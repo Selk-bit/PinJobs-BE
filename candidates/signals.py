@@ -123,8 +123,8 @@ def handle_cv_update(sender, instance, **kwargs):
             cv = None
 
     # Generate PDF if both cv_data and template exist
-    # if cv and cv.cv_data and cv.cv_data.name and cv.template:
-    #     generate_cv_pdf(cv)
+    if cv and cv.cv_data and cv.cv_data.name and cv.template:
+        generate_cv_pdf(cv)
 
 
 @receiver(post_save, sender=User)
@@ -147,30 +147,38 @@ def create_candidate(sender, instance, created, **kwargs):
 @receiver(post_save, sender=CVData)
 def generate_score_for_tailored_cv(sender, instance, created, **kwargs):
     """
-    Signal to generate a similarity score for a tailored CV after it is created.
+    Signal to generate a similarity score for a tailored CV after the CVData is updated,
+    only if the previous `title`, `name`, and `email` fields were None.
     """
-    # Only act on creation and for tailored CVs
-    if not created or instance.cv.cv_type != instance.cv.TAILORED:
-        print("Not Tailored")
+    # Skip on creation; only run on update
+    if created:
+        return
+
+    # Fetch the previous state of the instance
+    previous_instance = sender.objects.get(pk=instance.pk)
+
+    # Check if the previous values for `title`, `name`, and `email` were None
+    if previous_instance.title is not None or previous_instance.name is not None or previous_instance.email is not None:
+        return  # Do nothing if any of the fields were not None before the update
+
+    # Ensure this is for a tailored CV and that it's full
+    if instance.cv.cv_type != instance.cv.TAILORED and instance.name:
         return
 
     try:
-        job = instance.cv.job  # Associated job for the tailored CV
+        # Get the associated job for the tailored CV
+        job = instance.cv.job
         if not job:
-            print("Cannot Find the Job")
-            return  # No job associated; nothing to score
+            return  # No associated job; nothing to score
 
         candidate = instance.cv.candidate
         base_cv = CV.objects.filter(candidate=candidate, cv_type=CV.BASE).first()
 
         if not base_cv or not hasattr(base_cv, 'cv_data'):
-            print("No Base CV is found")
             return  # Base CV or its data is missing; cannot proceed
 
         # Construct the prompt for Gemini
         tailored_cv_data = instance
-        # prompt = construct_only_score_job_prompt(tailored_cv_data, job.description)
-
         job_data = {
             "id": job.id,
             "title": job.title,
@@ -179,21 +187,17 @@ def generate_score_for_tailored_cv(sender, instance, created, **kwargs):
             "skills": ', '.join(job.skills_required or [])
         }
         candidate_profile = construct_candidate_profile(tailored_cv_data)
-        print("***********************************************************")
-        print(candidate_profile)
-        print("***********************************************************")
+
         prompt = construct_similarity_prompt(candidate_profile, [job_data])
 
         # Fetch the similarity score from Gemini
         gemini_response = get_gemini_response(prompt)
         gemini_response = (gemini_response.split("```json")[-1]).split("```")[0]
-        print("----------------------------------------------------------")
-        print(gemini_response)
-        print("----------------------------------------------------------")
+
         score_data = json.loads(gemini_response)[0]
         score = score_data.get("score", 0)
 
-        # Create the JobSearch instance
+        # Create or update the JobSearch instance
         JobSearch.objects.update_or_create(
             cv=instance.cv,
             job=job,
@@ -201,7 +205,7 @@ def generate_score_for_tailored_cv(sender, instance, created, **kwargs):
         )
 
     except Exception as e:
-        # Log the error
+        # Log the error for debugging purposes
         print(f"Failed to generate similarity score for tailored CV: {e}")
 
 
