@@ -168,6 +168,9 @@ def generate_score_for_tailored_cv(sender, instance, created, **kwargs):
         # Construct the prompt for Gemini
         tailored_cv_data = instance
         prompt = construct_only_score_job_prompt(tailored_cv_data, job.description)
+        print("-----------------------------------------------------------")
+        print(job.description)
+        print("-----------------------------------------------------------")
 
         # Fetch the similarity score from Gemini
         gemini_response = get_gemini_response(prompt)
