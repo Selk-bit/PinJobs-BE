@@ -1983,7 +1983,8 @@ class ExistingJobCVView(APIView):
                 "requirements": ', '.join(job.requirements or []),
                 "skills": ', '.join(job.skills_required or [])
             }
-            prompt = construct_similarity_prompt(base_cv_data, [job_data])
+            candidate_profile = construct_candidate_profile(base_cv_data)
+            prompt = construct_similarity_prompt(candidate_profile, [job_data])
             try:
                 gemini_response = get_gemini_response(prompt)
                 gemini_response = (gemini_response.split("```json")[-1]).split("```")[0]

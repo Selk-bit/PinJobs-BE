@@ -4,7 +4,8 @@ from .models import (Keyword, Location, KeywordLocationCombination, CV, Template
                      Candidate, JobSearch)
 from django.contrib.auth.models import User
 from .constants import DEFAULT_TEMPLATE_DATA
-from .utils import generate_cv_pdf, construct_only_score_job_prompt, get_gemini_response, construct_similarity_prompt
+from .utils import (generate_cv_pdf, construct_only_score_job_prompt, construct_candidate_profile,
+                    get_gemini_response, construct_similarity_prompt)
 import json
 
 
@@ -177,7 +178,8 @@ def generate_score_for_tailored_cv(sender, instance, created, **kwargs):
             "requirements": ', '.join(job.requirements or []),
             "skills": ', '.join(job.skills_required or [])
         }
-        prompt = construct_similarity_prompt(tailored_cv_data, [job_data])
+        candidate_profile = construct_candidate_profile(tailored_cv_data)
+        prompt = construct_similarity_prompt(candidate_profile, [job_data])
 
         # Fetch the similarity score from Gemini
         gemini_response = get_gemini_response(prompt)
