@@ -1988,7 +1988,7 @@ class ExistingJobCVView(APIView):
             try:
                 gemini_response = get_gemini_response(prompt)
                 gemini_response = (gemini_response.split("```json")[-1]).split("```")[0]
-                score_data = json.loads(gemini_response)
+                score_data = json.loads(gemini_response)[0]
                 score = score_data.get("score", 0)
             except Exception as e:
                 return Response({'error': f"Failed to fetch score from Gemini: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

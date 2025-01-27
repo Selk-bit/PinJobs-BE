@@ -184,7 +184,7 @@ def generate_score_for_tailored_cv(sender, instance, created, **kwargs):
         # Fetch the similarity score from Gemini
         gemini_response = get_gemini_response(prompt)
         gemini_response = (gemini_response.split("```json")[-1]).split("```")[0]
-        score_data = json.loads(gemini_response)
+        score_data = json.loads(gemini_response)[0]
         score = score_data.get("score", 0)
 
         # Create the JobSearch instance
