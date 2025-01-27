@@ -150,6 +150,7 @@ def generate_score_for_tailored_cv(sender, instance, created, **kwargs):
     """
     # Only act on creation and for tailored CVs
     if not created or instance.cv.cv_type != instance.cv.TAILORED:
+        print("Not Tailored")
         return
 
     try:
