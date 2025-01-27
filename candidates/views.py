@@ -1975,7 +1975,15 @@ class ExistingJobCVView(APIView):
             score = job_search.similarity_score
         else:
             # Construct a prompt for Gemini to get only the similarity score
-            prompt = construct_only_score_job_prompt(base_cv_data, job.description)
+            # prompt = construct_only_score_job_prompt(base_cv_data, job.description)
+            job_data = {
+                "id": job.id,
+                "title": job.title,
+                "description": job.description,
+                "requirements": ', '.join(job.requirements or []),
+                "skills": ', '.join(job.skills_required or [])
+            }
+            prompt = construct_similarity_prompt(base_cv_data, [job_data])
             try:
                 gemini_response = get_gemini_response(prompt)
                 gemini_response = (gemini_response.split("```json")[-1]).split("```")[0]
