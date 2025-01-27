@@ -98,3 +98,16 @@ whitenoise==6.8.2
 wsproto==1.2.0
 yarl==1.17.1
 gunicorn
+drf_yasg
+Pillow
+django-import-export
+psycopg2-binary
+django-cors-headers
+pdf2image
+httpx
+aiofiles
+uvicorn
+django-storages
+boto3
+django-allauth
+dj-rest-auth
