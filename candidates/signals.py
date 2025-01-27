@@ -179,11 +179,17 @@ def generate_score_for_tailored_cv(sender, instance, created, **kwargs):
             "skills": ', '.join(job.skills_required or [])
         }
         candidate_profile = construct_candidate_profile(tailored_cv_data)
+        print("***********************************************************")
+        print(candidate_profile)
+        print("***********************************************************")
         prompt = construct_similarity_prompt(candidate_profile, [job_data])
 
         # Fetch the similarity score from Gemini
         gemini_response = get_gemini_response(prompt)
         gemini_response = (gemini_response.split("```json")[-1]).split("```")[0]
+        print("----------------------------------------------------------")
+        print(gemini_response)
+        print("----------------------------------------------------------")
         score_data = json.loads(gemini_response)[0]
         score = score_data.get("score", 0)
 
