@@ -989,7 +989,7 @@ class UserProfileView(APIView):
                 "country": openapi.Schema(type=openapi.TYPE_STRING, description="Country."),
                 "profile_picture": openapi.Schema(
                     type=openapi.TYPE_FILE,
-                    description="Profile picture (image file)."
+                    description="Profile picture (image file).",
                 ),
             },
             required=["first_name", "last_name"]

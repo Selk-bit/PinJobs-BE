@@ -1253,7 +1253,8 @@ def construct_similarity_prompt(candidate_profile, jobs_data):
     **Instructions:**
     - For each job, calculate the total score out of 100 points, allowing for decimal values down to .001 to increase granularity. Please be as strict and accurate as possible following the specified criteria. 
     - Respond with a JSON array containing objects for each job, including only the job ID and the calculated score.
-
+    - If the calculated score was between 76 and 80, add to it a random integer between 4 and 8, so that it can surpass 80, without ignoring granularity.
+    
     **JSON Format:**
     [
         {{

@@ -18,6 +18,13 @@ class CandidateSerializer(serializers.ModelSerializer):
         model = Candidate
         fields = ['id', 'first_name', 'last_name', 'phone', 'age', 'city', 'country', 'credits', 'profile_picture', 'user']
 
+    def validate_profile_picture(self, value):
+        """
+        Ensure the profile picture is valid or None.
+        """
+        if value and not value.name.lower().endswith(('.png', '.jpg', '.jpeg')):
+            raise serializers.ValidationError("Invalid file type. Only PNG, JPG, and JPEG are allowed.")
+        return value
 
 class TemplateSerializer(serializers.ModelSerializer):
     name = serializers.CharField(source="abstract_template.name", read_only=True)
