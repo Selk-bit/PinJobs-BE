@@ -162,6 +162,9 @@ def generate_score_for_tailored_cv(sender, instance, created, **kwargs):
     if previous_instance.title is not None or previous_instance.name is not None or previous_instance.email is not None:
         print("************************************************************************")
         print("Not None")
+        print(previous_instance.title)
+        print(previous_instance.name)
+        print(previous_instance.email)
         return  # Do nothing if any of the fields were not None before the update
 
     # Ensure this is for a tailored CV and that it's full
