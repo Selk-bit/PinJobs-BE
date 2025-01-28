@@ -3107,6 +3107,7 @@ class GenerateJobCVScoreView(APIView):
             return Response(
                 {
                     "detail": "Similarity score generated successfully.",
+                    "score": score
                 },
                 status=status.HTTP_200_OK
             )
