@@ -22,9 +22,23 @@ class CandidateSerializer(serializers.ModelSerializer):
         """
         Ensure the profile picture is valid or None.
         """
-        if value and not value.name.lower().endswith(('.png', '.jpg', '.jpeg')):
-            raise serializers.ValidationError("Invalid file type. Only PNG, JPG, and JPEG are allowed.")
+        if value:
+            if not value.name.lower().endswith(('.png', '.jpg', '.jpeg')):
+                raise serializers.ValidationError("Invalid file type. Only PNG, JPG, and JPEG are allowed.")
         return value
+
+    def update(self, instance, validated_data):
+        """
+        Handle the case where profile_picture is not included in the request.
+        """
+        profile_picture = validated_data.pop('profile_picture', None)
+
+        # If profile_picture is not provided in the data, keep the existing one
+        if profile_picture is None and 'profile_picture' in self.initial_data:
+            validated_data['profile_picture'] = instance.profile_picture
+
+        return super().update(instance, validated_data)
+
 
 class TemplateSerializer(serializers.ModelSerializer):
     name = serializers.CharField(source="abstract_template.name", read_only=True)

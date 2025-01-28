@@ -59,6 +59,9 @@ from allauth.socialaccount.models import SocialLogin
 from django.db.models.functions import Lower
 from .constants import FRONTEND_BASE_URL
 from typing import Dict
+from django.core.mail import EmailMultiAlternatives
+from django.template.loader import render_to_string
+from django.utils.html import strip_tags
 
 
 class EmailVerificationTokenGenerator(PasswordResetTokenGenerator):
@@ -735,19 +738,33 @@ class SignUpView(APIView):
             # Build the verification URL
             verification_url = f"{FRONTEND_BASE_URL}/verify-email?{urlencode({'token': token, 'user_id': user.id})}"
 
+            html_content = render_to_string("emails/verify_email.html", {"verification_url": verification_url})
+            text_content = strip_tags(html_content)  # Fallback for email clients that don't support HTML
+
             # Send verification email
-            send_mail(
+            # send_mail(
+            #     subject="Verify Your Account",
+            #     message=f"Click the link to verify your account: {verification_url}",
+            #     from_email=settings.EMAIL_HOST_USER,
+            #     recipient_list=[email],
+            # )
+
+            email = EmailMultiAlternatives(
                 subject="Verify Your Account",
-                message=f"Click the link to verify your account: {verification_url}",
+                body=text_content,
                 from_email=settings.EMAIL_HOST_USER,
-                recipient_list=[email],
+                to=[email]
             )
+            email.attach_alternative(html_content, "text/html")
+            email.send()
+
             candidate = get_object_or_404(Candidate, user=user)
 
             config = GeneralSetting.objects.get_configuration()
             num_credits = config.credits_to_start_with
             candidate.credits = num_credits
-            
+            candidate.save()
+
             serializer = CandidateSerializer(candidate)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         except Exception as e:
