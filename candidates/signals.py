@@ -145,6 +145,14 @@ def create_candidate(sender, instance, created, **kwargs):
         Candidate.objects.get_or_create(user=instance)
 
 
+@receiver(pre_save, sender=CVData)
+def track_previous_state(sender, instance, **kwargs):
+    if instance.pk:
+        # Fetch the previous instance
+        previous_instance = sender.objects.get(pk=instance.pk)
+        instance._previous_instance = previous_instance  # Attach it to the current instance
+
+
 @receiver(post_save, sender=CVData)
 def generate_score_for_tailored_cv(sender, instance, created, **kwargs):
     """
@@ -152,70 +160,71 @@ def generate_score_for_tailored_cv(sender, instance, created, **kwargs):
     only if the previous `title`, `name`, and `email` fields were None.
     """
     # Skip on creation; only run on update
-    print("hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh")
     if created:
         return
+
     # Fetch the previous state of the instance
-    previous_instance = sender.objects.get(pk=instance.pk)
+    if hasattr(instance, '_previous_instance'):
+        previous_instance = instance._previous_instance
 
-    # Check if the previous values for `title`, `name`, and `email` were None
-    if previous_instance.title is not None or previous_instance.name is not None or previous_instance.email is not None:
-        print("************************************************************************")
-        print("Not None")
-        return  # Do nothing if any of the fields were not None before the update
-
-    # Ensure this is for a tailored CV and that it's full
-    if instance.cv.cv_type != instance.cv.TAILORED and instance.name:
-        print("************************************************************************")
-        print("No name or not tailored")
-        return
-
-    try:
-        # Get the associated job for the tailored CV
-        job = instance.cv.job
-        if not job:
+        # Check if the previous values for `title`, `name`, and `email` were None
+        if previous_instance.title is not None or previous_instance.name is not None or previous_instance.email is not None:
             print("************************************************************************")
-            print("No Job")
-            return  # No associated job; nothing to score
+            print("Not None")
+            return  # Do nothing if any of the fields were not None before the update
 
-        candidate = instance.cv.candidate
-        base_cv = CV.objects.filter(candidate=candidate, cv_type=CV.BASE).first()
-
-        if not base_cv or not hasattr(base_cv, 'cv_data'):
+        # Ensure this is for a tailored CV and that it's full
+        if instance.cv.cv_type != instance.cv.TAILORED and instance.name:
             print("************************************************************************")
-            print("no base cv data")
-            return  # Base CV or its data is missing; cannot proceed
+            print("No name or not tailored")
+            return
 
-        # Construct the prompt for Gemini
-        tailored_cv_data = instance
-        job_data = {
-            "id": job.id,
-            "title": job.title,
-            "description": job.description,
-            "requirements": ', '.join(job.requirements or []),
-            "skills": ', '.join(job.skills_required or [])
-        }
-        candidate_profile = construct_candidate_profile(tailored_cv_data)
+        try:
+            # Get the associated job for the tailored CV
+            job = instance.cv.job
+            if not job:
+                print("************************************************************************")
+                print("No Job")
+                return  # No associated job; nothing to score
 
-        prompt = construct_similarity_prompt(candidate_profile, [job_data])
+            candidate = instance.cv.candidate
+            base_cv = CV.objects.filter(candidate=candidate, cv_type=CV.BASE).first()
 
-        # Fetch the similarity score from Gemini
-        gemini_response = get_gemini_response(prompt)
-        gemini_response = (gemini_response.split("```json")[-1]).split("```")[0]
+            if not base_cv or not hasattr(base_cv, 'cv_data'):
+                print("************************************************************************")
+                print("no base cv data")
+                return  # Base CV or its data is missing; cannot proceed
 
-        score_data = json.loads(gemini_response)[0]
-        score = score_data.get("score", 0)
+            # Construct the prompt for Gemini
+            tailored_cv_data = instance
+            job_data = {
+                "id": job.id,
+                "title": job.title,
+                "description": job.description,
+                "requirements": ', '.join(job.requirements or []),
+                "skills": ', '.join(job.skills_required or [])
+            }
+            candidate_profile = construct_candidate_profile(tailored_cv_data)
 
-        # Create or update the JobSearch instance
-        JobSearch.objects.update_or_create(
-            cv=instance.cv,
-            job=job,
-            defaults={"similarity_score": score, "last_scored_at": datetime.now()}
-        )
+            prompt = construct_similarity_prompt(candidate_profile, [job_data])
 
-    except Exception as e:
-        # Log the error for debugging purposes
-        print(f"Failed to generate similarity score for tailored CV: {e}")
+            # Fetch the similarity score from Gemini
+            gemini_response = get_gemini_response(prompt)
+            gemini_response = (gemini_response.split("```json")[-1]).split("```")[0]
+
+            score_data = json.loads(gemini_response)[0]
+            score = score_data.get("score", 0)
+
+            # Create or update the JobSearch instance
+            JobSearch.objects.update_or_create(
+                cv=instance.cv,
+                job=job,
+                defaults={"similarity_score": score, "last_scored_at": datetime.now()}
+            )
+
+        except Exception as e:
+            # Log the error for debugging purposes
+            print(f"Failed to generate similarity score for tailored CV: {e}")
 
 
 @receiver(pre_save, sender=JobSearch)
