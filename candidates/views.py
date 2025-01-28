@@ -743,6 +743,10 @@ class SignUpView(APIView):
                 recipient_list=[email],
             )
             candidate = get_object_or_404(Candidate, user=user)
+
+            config = GeneralSetting.objects.get_configuration()
+            num_credits = config.credits_to_start_with
+            candidate.credits = num_credits
             
             serializer = CandidateSerializer(candidate)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
