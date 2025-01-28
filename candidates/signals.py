@@ -7,6 +7,7 @@ from .constants import DEFAULT_TEMPLATE_DATA
 from .utils import (generate_cv_pdf, construct_only_score_job_prompt, construct_candidate_profile,
                     get_gemini_response, construct_similarity_prompt)
 import json
+from datetime import datetime
 
 
 @receiver(post_save, sender=Keyword)
@@ -159,22 +160,30 @@ def generate_score_for_tailored_cv(sender, instance, created, **kwargs):
 
     # Check if the previous values for `title`, `name`, and `email` were None
     if previous_instance.title is not None or previous_instance.name is not None or previous_instance.email is not None:
+        print("************************************************************************")
+        print("Not None")
         return  # Do nothing if any of the fields were not None before the update
 
     # Ensure this is for a tailored CV and that it's full
     if instance.cv.cv_type != instance.cv.TAILORED and instance.name:
+        print("************************************************************************")
+        print("No name or not tailored")
         return
 
     try:
         # Get the associated job for the tailored CV
         job = instance.cv.job
         if not job:
+            print("************************************************************************")
+            print("No Job")
             return  # No associated job; nothing to score
 
         candidate = instance.cv.candidate
         base_cv = CV.objects.filter(candidate=candidate, cv_type=CV.BASE).first()
 
         if not base_cv or not hasattr(base_cv, 'cv_data'):
+            print("************************************************************************")
+            print("no base cv data")
             return  # Base CV or its data is missing; cannot proceed
 
         # Construct the prompt for Gemini
@@ -201,7 +210,7 @@ def generate_score_for_tailored_cv(sender, instance, created, **kwargs):
         JobSearch.objects.update_or_create(
             cv=instance.cv,
             job=job,
-            defaults={"similarity_score": score}
+            defaults={"similarity_score": score, "last_scored_at": datetime.now()}
         )
 
     except Exception as e:
