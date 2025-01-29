@@ -16,9 +16,9 @@ class Candidate(models.Model):
     phone = models.CharField(max_length=100, blank=True, null=True)
     age = models.IntegerField(blank=True, null=True)
     city = models.CharField(max_length=100, blank=True, null=True)
-    country = models.CharField(max_length=100, blank=True, null=True)  # Country field
+    country = models.CharField(max_length=100, blank=True, null=True)
     credits = models.IntegerField(default=0)
-    profile_picture = models.ImageField(upload_to="profile_pictures/", blank=True, null=True)  # New field
+    profile_picture = models.ImageField(upload_to="profile_pictures/", blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

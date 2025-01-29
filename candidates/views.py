@@ -742,12 +742,6 @@ class SignUpView(APIView):
             text_content = strip_tags(html_content)  # Fallback for email clients that don't support HTML
 
             # Send verification email
-            # send_mail(
-            #     subject="Verify Your Account",
-            #     message=f"Click the link to verify your account: {verification_url}",
-            #     from_email=settings.EMAIL_HOST_USER,
-            #     recipient_list=[email],
-            # )
 
             email = EmailMultiAlternatives(
                 subject="Verify Your Account",

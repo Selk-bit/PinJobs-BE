@@ -12,7 +12,12 @@ class UserSerializer(serializers.ModelSerializer):
 
 
 class CandidateSerializer(serializers.ModelSerializer):
-    user = UserSerializer(read_only=True)  # Nested serializer for the User data
+    user = UserSerializer(read_only=True)
+    profile_picture = serializers.ImageField(
+        required=False,
+        allow_null=True,
+        use_url=True
+    )
 
     class Meta:
         model = Candidate
@@ -26,21 +31,6 @@ class CandidateSerializer(serializers.ModelSerializer):
             if not hasattr(value, 'name') or not value.name.lower().endswith(('.png', '.jpg', '.jpeg')):
                 raise serializers.ValidationError("Invalid file type. Only PNG, JPG, and JPEG are allowed.")
         return value
-
-    def update(self, instance, validated_data):
-        """
-        Handle the case where profile_picture is not included in the request.
-        """
-        request_profile_picture = self.initial_data.get('profile_picture', None)
-
-        # If explicitly set to None, remove the profile picture
-        if request_profile_picture in [None, '', 'null']:
-            validated_data['profile_picture'] = None
-        elif 'profile_picture' not in validated_data:
-            # Keep existing profile picture if not provided
-            validated_data['profile_picture'] = instance.profile_picture
-
-        return super().update(instance, validated_data)
 
 
 class TemplateSerializer(serializers.ModelSerializer):
