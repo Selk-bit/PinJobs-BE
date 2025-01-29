@@ -978,7 +978,9 @@ class PasswordResetConfirmView(APIView):
 
 
 class UserProfileView(APIView):
+    serializer_class = CandidateSerializer
     permission_classes = [IsAuthenticated]
+    parser_classes = (MultiPartParser, FormParser)
 
     @swagger_auto_schema(
         operation_description="Retrieve the authenticated user's profile.",
