@@ -23,7 +23,7 @@ class CandidateSerializer(serializers.ModelSerializer):
         Ensure the profile picture is valid or None.
         """
         if value:
-            if not value.name.lower().endswith(('.png', '.jpg', '.jpeg')):
+            if not hasattr(value, 'name') or not value.name.lower().endswith(('.png', '.jpg', '.jpeg')):
                 raise serializers.ValidationError("Invalid file type. Only PNG, JPG, and JPEG are allowed.")
         return value
 
@@ -31,10 +31,13 @@ class CandidateSerializer(serializers.ModelSerializer):
         """
         Handle the case where profile_picture is not included in the request.
         """
-        profile_picture = validated_data.pop('profile_picture', None)
+        request_profile_picture = self.initial_data.get('profile_picture', None)
 
-        # If profile_picture is not provided in the data, keep the existing one
-        if profile_picture is None and 'profile_picture' in self.initial_data:
+        # If explicitly set to None, remove the profile picture
+        if request_profile_picture in [None, '', 'null']:
+            validated_data['profile_picture'] = None
+        elif 'profile_picture' not in validated_data:
+            # Keep existing profile picture if not provided
             validated_data['profile_picture'] = instance.profile_picture
 
         return super().update(instance, validated_data)
