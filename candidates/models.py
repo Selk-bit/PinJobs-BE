@@ -447,13 +447,7 @@ class Language(models.Model):
 
 
 class AnswerSet(models.Model):
-    group_identifier = models.CharField(
-        max_length=255,
-        db_index=True,
-        help_text="Unique identifier for linking translations. Choose an existing one or create a new one."
-    )
     language = models.ForeignKey(Language, on_delete=models.CASCADE, related_name="answer_sets")
-
     name = models.CharField(max_length=255)
 
     def __str__(self):

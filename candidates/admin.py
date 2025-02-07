@@ -416,13 +416,10 @@ class AnswerSetAdmin(admin.ModelAdmin):
         initial = super().get_changeform_initial_data(request)
 
         # Grab our custom query params (if any) that we appended
-        prefill_group_identifier = request.GET.get("prefill_group_identifier")
         prefill_name = request.GET.get("prefill_name")
         prefill_language = request.GET.get("prefill_language")
 
         # Use them to populate defaults for new AnswerSet
-        if prefill_group_identifier:
-            initial["group_identifier"] = prefill_group_identifier
         if prefill_name:
             initial["name"] = prefill_name
         if prefill_language:
