@@ -1,9 +1,11 @@
 from rest_framework import viewsets
 from .models import (Candidate, CV, CVData, Job, JobSearch, Payment, CreditPurchase, Template, CreditOrder,
-                     Pack, Price, Favorite, AbstractTemplate, JobClick, Ad, GeneralSetting, SearchTerm)
+                     Pack, Price, Favorite, AbstractTemplate, JobClick, Ad, GeneralSetting, SearchTerm,
+                     Language, Question, AnswerSet, AnswerOption, CandidateResponse, CandidateCareer, Career,
+                     CareerTranslation)
 from .serializers import (CandidateSerializer, CVSerializer, CVDataSerializer, JobSerializer, JobSearchSerializer,
                           PaymentSerializer, CreditPurchaseSerializer, TemplateSerializer, PackSerializer,
-                          AbstractTemplateSerializer, AdSerializer)
+                          AbstractTemplateSerializer, AdSerializer, QuestionSerializer, CandidateResponseSerializer)
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -17,7 +19,7 @@ from django.db.models.signals import post_save
 from django.conf import settings
 import os
 from .utils import (get_gemini_response, deduct_credits, has_sufficient_credits, construct_only_score_job_prompt,
-                    construct_similarity_prompt, generate_cv_pdf)
+                    construct_similarity_prompt, generate_cv_pdf, construct_career_guidance_prompt)
 import json
 from .tasks import run_scraping_task
 from django.contrib.auth import authenticate
@@ -62,6 +64,9 @@ from typing import Dict
 from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
 from django.utils.html import strip_tags
+from django.utils.text import slugify
+import random
+import string
 
 
 class EmailVerificationTokenGenerator(PasswordResetTokenGenerator):
@@ -69,6 +74,7 @@ class EmailVerificationTokenGenerator(PasswordResetTokenGenerator):
 
 
 email_verification_token = EmailVerificationTokenGenerator()
+
 
 class JobFilter(django_filters.FilterSet):
     description = django_filters.CharFilter(field_name="description", lookup_expr='icontains')
@@ -978,9 +984,7 @@ class PasswordResetConfirmView(APIView):
 
 
 class UserProfileView(APIView):
-    serializer_class = CandidateSerializer
     permission_classes = [IsAuthenticated]
-    parser_classes = (MultiPartParser, FormParser)
 
     @swagger_auto_schema(
         operation_description="Retrieve the authenticated user's profile.",
@@ -3817,3 +3821,314 @@ class AdsByTypeView(APIView):
         ads = Ad.objects.filter(is_active=True, ad_type=ad_type).order_by('-created_at')
         serializer = AdSerializer(ads, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class QuestionsView(APIView):
+    """
+    API endpoint to retrieve all questions in a selected language.
+    """
+
+    @swagger_auto_schema(
+        operation_description="Retrieve all questions in a specific language.",
+        manual_parameters=[
+            openapi.Parameter(
+                'language',
+                openapi.IN_QUERY,
+                description="Language code (e.g., 'en', 'fr', 'es'). Required.",
+                type=openapi.TYPE_STRING,
+                required=True
+            ),
+        ],
+        responses={
+            200: QuestionSerializer(many=True),
+            400: openapi.Response(description="Bad Request - Missing or invalid language parameter"),
+        }
+    )
+    def get(self, request):
+        language_code = request.query_params.get("language")
+
+        if not language_code:
+            return Response({"error": "Language parameter is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            language = Language.objects.get(code=language_code)  # Fetch Language instance
+        except Language.DoesNotExist:
+            return Response({"error": "Invalid language code."}, status=status.HTTP_400_BAD_REQUEST)
+
+        questions = Question.objects.filter(language=language).order_by("id")
+        serializer = QuestionSerializer(questions, many=True)
+
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class QuestionTranslationsView(APIView):
+    """
+    API endpoint to retrieve all translations of a question by its group_identifier.
+    """
+
+    @swagger_auto_schema(
+        operation_description="Retrieve all translations of a question by its group_identifier.",
+        manual_parameters=[
+            openapi.Parameter(
+                'identifier',
+                openapi.IN_PATH,
+                description="Unique group identifier of the question.",
+                type=openapi.TYPE_STRING,
+                required=True
+            ),
+        ],
+        responses={
+            200: QuestionSerializer(many=True),
+            404: openapi.Response(description="Not Found - No questions found for this identifier"),
+        }
+    )
+    def get(self, request, identifier):
+        questions = Question.objects.filter(group_identifier=identifier)
+
+        if not questions.exists():
+            return Response({"error": "No questions found for this identifier."}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = QuestionSerializer(questions, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class ResponsesView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_description="Submit responses to multiple questions.",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                "cv_id": openapi.Schema(type=openapi.TYPE_INTEGER, description="Chosen CV ID"),
+                "responses": openapi.Schema(
+                    type=openapi.TYPE_ARRAY,
+                    description="List of responses",
+                    items=openapi.Schema(
+                        type=openapi.TYPE_OBJECT,
+                        properties={
+                            "question_id": openapi.Schema(type=openapi.TYPE_INTEGER, description="Question ID"),
+                            "text_answer": openapi.Schema(type=openapi.TYPE_STRING, description="Text response"),
+                            "selected_option": openapi.Schema(
+                                type=openapi.TYPE_INTEGER, description="Selected answer option (for radio buttons)"
+                            ),
+                            "selected_options": openapi.Schema(
+                                type=openapi.TYPE_ARRAY,
+                                items=openapi.Items(type=openapi.TYPE_INTEGER),
+                                description="List of selected answer options (for checkboxes)"
+                            ),
+                        },
+                    ),
+                )
+            },
+            required=["cv_id", "responses"],
+        ),
+        responses={200: "Responses submitted successfully", 400: "Bad request"},
+    )
+    def post(self, request):
+        candidate = request.user.candidate
+        responses_data = request.data.get("responses", [])
+        cv_id = request.data.get("cv_id")
+
+        # 🔹 **Fetch the CV in a single query**
+        chosen_cv = CV.objects.filter(candidate=candidate, id=cv_id).first() or \
+                    CV.objects.filter(candidate=candidate, cv_type=CV.BASE).first()
+
+        if not chosen_cv:
+            return Response({"error": "No valid CV found. Ensure you have a base CV or a valid selection."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        if not hasattr(chosen_cv, 'cv_data'):
+            return Response({"error": "CV data is missing for the selected CV."}, status=status.HTTP_400_BAD_REQUEST)
+
+        cv_data = chosen_cv.cv_data
+
+        # 🔹 **Optimized Querying: Fetch all required data at once**
+        question_ids = [response["question_id"] for response in responses_data]
+        questions = {q.id: q for q in Question.objects.filter(id__in=question_ids).select_related("answer_set")}
+        existing_responses = {
+            (response.question.id, response.candidate.id): response
+            for response in CandidateResponse.objects.filter(candidate=candidate, question_id__in=question_ids)
+        }
+        answer_options = {opt.id: opt for opt in AnswerOption.objects.filter(answer_set__in=[q.answer_set for q in questions.values() if q.answer_set])}
+
+        # 🔹 **Bulk Create / Update Processing**
+        response_instances = []
+        new_responses = []
+        m2m_data = []
+        errors = []
+
+        for response_data in responses_data:
+            try:
+                question = questions.get(response_data["question_id"])
+                if not question:
+                    errors.append({"question_id": response_data["question_id"], "error": "Question not found."})
+                    continue
+
+                existing_response = existing_responses.get((question.id, candidate.id))
+                response_dict = {"candidate": candidate, "question": question}
+
+                # Validate that only one response type is filled
+                filled_fields = [field for field in ["text_answer", "selected_option", "selected_options"] if response_data.get(field)]
+                if len(filled_fields) > 1:
+                    errors.append({"question_id": question.id, "error": "Only one type of response is allowed per question."})
+                    continue
+
+                # Assign values based on question type
+                if "text_answer" in response_data:
+                    response_dict["text_answer"] = response_data["text_answer"]
+                if "selected_option" in response_data:
+                    response_dict["selected_option"] = answer_options.get(response_data["selected_option"])
+
+                selected_options = list(filter(None, [answer_options.get(opt_id) for opt_id in response_data.get("selected_options", [])]))
+
+                # Bulk create/update responses
+                if existing_response:
+                    serializer = CandidateResponseSerializer(instance=existing_response, data=response_dict, partial=True)
+                    if serializer.is_valid():
+                        response_instances.append(serializer.save())
+                    else:
+                        errors.append(serializer.errors)
+                else:
+                    new_response = CandidateResponse.objects.create(**response_dict)
+                    new_responses.append(new_response)
+                    if selected_options:
+                        m2m_data.append((new_response, selected_options))
+
+            except AnswerOption.DoesNotExist:
+                errors.append({"error": "One or more selected options do not exist."})
+
+        # Bulk update Many-to-Many Fields
+        for response, selected_options in m2m_data:
+            response.selected_options.set(selected_options)
+
+        if errors:
+            return Response({"errors": errors}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Fetch newly saved responses efficiently
+        stepper_responses = CandidateResponse.objects.filter(candidate=candidate).values(
+            "question__text", "text_answer", "selected_option__text", "selected_options__text"
+        )
+
+        # Fetch available languages efficiently
+        available_languages = {lang.code: lang.name for lang in Language.objects.all()}
+
+        candidate_profile = construct_candidate_profile(cv_data)
+
+        # Construct AI prompt for career recommendations
+        prompt = construct_career_guidance_prompt(candidate_profile, list(stepper_responses), available_languages)
+
+        try:
+            gemini_response = get_gemini_response(prompt)
+            print(gemini_response)
+            gemini_response = (gemini_response.split("```json")[-1]).split("```")[0]
+            career_data = json.loads(gemini_response)
+        except Exception as e:
+            return Response({"error": f"Failed to fetch career recommendations from Gemini: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        # Store career recommendations efficiently
+        created_careers = []
+        for career_info in career_data:
+            # Ensure unique group_identifier by slugifying + adding a random suffix
+            slug = slugify(career_info["career_title"])
+            random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+            unique_identifier = f"{slug}-{random_suffix}"
+
+            career, _ = Career.objects.get_or_create(group_identifier=unique_identifier)
+
+            career_translations = []
+            for lang_code, lang_data in career_info["languages"].items():
+                language = Language.objects.filter(code=lang_code).first()
+                if language:
+                    translation, created = CareerTranslation.objects.update_or_create(
+                        career=career,
+                        language=language,
+                        defaults={
+                            "title": lang_data["title"],
+                            "transition_path": lang_data["transition_path"]
+                        }
+                    )
+                    if created:
+                        career_translations.append({
+                            "language": lang_code,
+                            "title": translation.title,
+                            "transition_path": translation.transition_path
+                        })
+
+            CandidateCareer.objects.get_or_create(candidate=candidate, career=career)
+            created_careers.append({"career_title": career_info["career_title"], "translations": career_translations})
+
+        return Response({"message": "Career recommendations stored successfully.", "careers": created_careers}, status=status.HTTP_200_OK)
+
+
+    @swagger_auto_schema(
+        operation_description="Retrieve all questions with their assigned responses for the authenticated user.",
+        responses={200: "List of questions with responses"},
+    )
+    def get(self, request):
+        candidate = request.user.candidate
+        questions = Question.objects.all()
+        response_data = []
+
+        for question in questions:
+            response = CandidateResponse.objects.filter(candidate=candidate, question=question).first()
+            response_details = CandidateResponseSerializer(response).data if response else None
+            response_data.append(response_details)
+
+        return Response(response_data, status=status.HTTP_200_OK)
+
+
+def get_answer_options(request, question_id):
+    question = get_object_or_404(Question, id=question_id)
+
+    answer_options = []
+    if question.answer_set:
+        answer_options = list(
+            question.answer_set.options.values("id", "text")
+        )
+
+    return JsonResponse({
+        "question_type": question.question_type,  # 🔹 Now includes question type
+        "options": answer_options
+    })
+
+
+class CandidateCareersView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_description="Retrieve AI-generated career recommendations in a specific language.",
+        manual_parameters=[
+            openapi.Parameter(
+                "language", openapi.IN_QUERY, description="Language code (e.g., 'en', 'fr', 'es')",
+                type=openapi.TYPE_STRING, required=True
+            )
+        ],
+        responses={200: "Career recommendations in the specified language", 400: "Bad request"},
+    )
+    def get(self, request):
+        candidate = request.user.candidate
+        language_code = request.GET.get("language")
+
+        if not language_code:
+            return Response({"error": "Language parameter is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        language = Language.objects.filter(code=language_code).first()
+        if not language:
+            return Response({"error": "Invalid language code."}, status=status.HTTP_400_BAD_REQUEST)
+
+        candidate_careers = CandidateCareer.objects.filter(candidate=candidate).select_related("career")
+        career_data = []
+
+        for candidate_career in candidate_careers:
+            career_translation = CareerTranslation.objects.filter(
+                career=candidate_career.career, language=language
+            ).first()
+
+            if career_translation:
+                career_data.append({
+                    "career_title": career_translation.title,
+                    "transition_path": career_translation.transition_path
+                })
+
+        return Response({"careers": career_data}, status=status.HTTP_200_OK)

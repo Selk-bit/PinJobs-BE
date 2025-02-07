@@ -6,9 +6,11 @@ from .views import (
     CandidateCVsView, RemoveFavoriteView, GetFavoriteScoresView, CandidateFavoriteJobsView, JobClickView,
     UserProfileView, PackPricesView, AbstractTemplateListView, CVDetailView, DownloadCVPDFView, JobDetailView,
     RecentSearchTermsView, PasswordResetRequestView, PasswordResetConfirmView, VerifyEmailView, custom_google_callback,
-    JobLocationsView, AdsByTypeView, GenerateJobCVScoreView
+    JobLocationsView, AdsByTypeView, GenerateJobCVScoreView, QuestionsView, QuestionTranslationsView, ResponsesView,
+    get_answer_options, CandidateCareersView
 )
 from django.contrib.auth import views as auth_views
+from django.contrib import admin
 
 urlpatterns = [
     path('auth/signup/', SignUpView.as_view(), name='signup'),
@@ -67,4 +69,12 @@ urlpatterns = [
 
     path('ads/', AdsByTypeView.as_view(), name='ads-by-type'),
 
+    path('stepper/questions/', QuestionsView.as_view(), name='ai-stepper-questions'),
+    path("stepper/questions/<str:identifier>/", QuestionTranslationsView.as_view(), name="question_translations"),
+    path('stepper/responses/', ResponsesView.as_view(), name='ai-stepper-responses'),
+    path('stepper/careers/', CandidateCareersView.as_view(), name='ai-stepper-careers'),
+
+    path("admin/get_answer_options/<int:question_id>/", get_answer_options, name="get_answer_options"),
 ]
+
+admin.site.site_header = 'PinJobs Dashboard'

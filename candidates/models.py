@@ -436,3 +436,119 @@ class SearchTerm(models.Model):
 
     def __str__(self):
         return f"{self.term} (Active: {self.is_active})"
+
+
+class Language(models.Model):
+    code = models.CharField(max_length=10, unique=True)  # e.g., "en", "fr", "es"
+    name = models.CharField(max_length=50, unique=True)  # English, French, Spanish
+
+    def __str__(self):
+        return self.name
+
+
+class AnswerSet(models.Model):
+    group_identifier = models.CharField(
+        max_length=255,
+        db_index=True,
+        help_text="Unique identifier for linking translations. Choose an existing one or create a new one."
+    )
+    language = models.ForeignKey(Language, on_delete=models.CASCADE, related_name="answer_sets")
+
+    name = models.CharField(max_length=255)
+
+    def __str__(self):
+        return f"{self.name} ({self.language.code})"
+
+
+class Question(models.Model):
+    TEXT = 'text'
+    RADIO = 'radio'
+    CHECKBOX = 'checkbox'
+    DROPDOWN = 'dropdown'
+
+    QUESTION_TYPES = [
+        (TEXT, 'Text'),
+        (RADIO, 'Radio'),
+        (CHECKBOX, 'Checkbox'),
+        (DROPDOWN, 'Dropdown'),
+    ]
+
+    group_identifier = models.CharField(
+        max_length=255,
+        db_index=True,
+        help_text="Unique identifier for linking translations. Choose an existing one or create a new one."
+    )
+    language = models.ForeignKey(Language, on_delete=models.CASCADE, related_name="questions")
+    name = models.CharField(max_length=255)
+    text = models.TextField()
+    description = models.TextField(blank=True, null=True)
+    question_type = models.CharField(max_length=10, choices=QUESTION_TYPES)
+    required = models.BooleanField(default=True)
+    answer_set = models.ForeignKey("AnswerSet", on_delete=models.SET_NULL, null=True, blank=True,
+                                   related_name="questions")
+
+    def __str__(self):
+        return f"{self.name} ({self.language.code})"
+
+
+class AnswerOption(models.Model):
+    answer_set = models.ForeignKey(AnswerSet, on_delete=models.CASCADE, related_name="options")
+    text = models.CharField(max_length=255)
+
+    def __str__(self):
+        return f"{self.text} (Set: {self.answer_set.name} - {self.answer_set.language.code})"
+
+
+class CandidateResponse(models.Model):
+    candidate = models.ForeignKey(Candidate, on_delete=models.CASCADE, related_name="responses")
+    question = models.ForeignKey(Question, on_delete=models.CASCADE, related_name="responses")
+
+    # Support for different types of answers
+    text_answer = models.TextField(blank=True, null=True)
+    selected_option = models.ForeignKey(
+        AnswerOption, on_delete=models.SET_NULL, blank=True, null=True, related_name="responses"
+    )
+    selected_options = models.ManyToManyField(
+        AnswerOption, blank=True, related_name="multi_responses"
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Response by {self.candidate.user.username} to {self.question.name}"
+
+
+class Career(models.Model):
+    group_identifier = models.CharField(
+        max_length=255,
+        unique=True,
+        help_text="Unique identifier to group translations of the same career title."
+    )
+
+    def __str__(self):
+        return f"Career Group: {self.group_identifier}"
+
+
+class CareerTranslation(models.Model):
+    career = models.ForeignKey(Career, on_delete=models.CASCADE, related_name="translations")
+    language = models.ForeignKey(Language, on_delete=models.CASCADE, related_name="career_translations")
+    title = models.CharField(max_length=255)
+    transition_path = models.TextField()
+
+    class Meta:
+        unique_together = ("career", "language")
+
+    def __str__(self):
+        return f"{self.title} ({self.language.code})"
+
+
+class CandidateCareer(models.Model):
+    candidate = models.ForeignKey(Candidate, on_delete=models.CASCADE, related_name="career_recommendations")
+    career = models.ForeignKey(Career, on_delete=models.CASCADE, related_name="candidates")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.candidate.user.username} - {self.career.group_identifier}"
+

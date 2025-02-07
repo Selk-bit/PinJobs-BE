@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from .models import (Candidate, CV, CVData, Job, JobSearch, Payment, CreditPurchase, Template, Location, Keyword,
-                     Price, Pack, AbstractTemplate, Favorite, Ad)
+                     Price, Pack, AbstractTemplate, Favorite, Ad, Question, AnswerOption, CandidateResponse)
 from django.contrib.auth.models import User
 from rest_framework.response import Response
 
@@ -221,3 +221,93 @@ class PackSerializer(serializers.ModelSerializer):
     class Meta:
         model = Pack
         fields = ['id', 'name', 'description', 'is_active', 'prices']
+        
+
+class QuestionSerializer(serializers.ModelSerializer):
+    """
+    Serializes the Question model with language codes and flattens answer set details.
+    """
+    language = serializers.CharField(source="language.code", read_only=True)  # Return language code instead of ID
+    answer_set_id = serializers.SerializerMethodField()
+    answer_set_occurrence = serializers.SerializerMethodField()
+    answer_set_options = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Question
+        fields = [
+            "id",
+            "group_identifier",
+            "language",
+            "name",
+            "text",
+            "description",
+            "question_type",
+            "answer_set_id",
+            "answer_set_occurrence",
+            "answer_set_options",
+        ]
+
+    def get_answer_set_id(self, obj):
+        """ Returns the ID of the answer set if it exists, else None. """
+        return obj.answer_set.id if obj.answer_set else None
+
+    def get_answer_set_occurrence(self, obj):
+        """
+        Returns the occurrence of this question using the same answer set.
+        """
+        if obj.answer_set:
+            all_questions = Question.objects.filter(answer_set=obj.answer_set).order_by("id")
+            return list(all_questions.values_list("id", flat=True)).index(obj.id) + 1
+        return None
+
+    def get_answer_set_options(self, obj):
+        """ Returns the list of answer options (ID + text) if the question has an answer set. """
+        if obj.answer_set:
+            return list(obj.answer_set.options.values("id", "text"))  # Fetch ID and text as objects
+        return None
+
+    def validate(self, data):
+        """
+        Ensure that the combination of group_identifier and language is unique.
+        """
+        group_identifier = data.get("group_identifier")
+        language = data.get("language")
+
+        if Question.objects.filter(group_identifier=group_identifier, language=language).exists():
+            raise serializers.ValidationError(
+                {"error": "A question with this group identifier already exists in the selected language."}
+            )
+
+        return data
+
+
+class CandidateResponseSerializer(serializers.ModelSerializer):
+    question = QuestionSerializer(read_only=True)  # Include full question details
+    selected_option = serializers.PrimaryKeyRelatedField(
+        queryset=AnswerOption.objects.all(), required=False, allow_null=True
+    )
+    selected_options = serializers.PrimaryKeyRelatedField(
+        queryset=AnswerOption.objects.all(), many=True, required=False, allow_null=True
+    )
+
+    class Meta:
+        model = CandidateResponse
+        fields = [
+            "id", "candidate", "question", "text_answer", "selected_option", "selected_options", "created_at"
+        ]
+        read_only_fields = ["created_at"]
+
+    def validate(self, data):
+        """ Ensure that response type matches the question type. """
+        question = self.context["question"]
+
+        if question.question_type == Question.TEXT and not data.get("text_answer"):
+            raise serializers.ValidationError({"text_answer": "This question requires a text response."})
+
+        if question.question_type == Question.RADIO and not data.get("selected_option"):
+            raise serializers.ValidationError({"selected_option": "This question requires a single selected option."})
+
+        if question.question_type == Question.CHECKBOX and not data.get("selected_options"):
+            raise serializers.ValidationError({"selected_options": "This question requires multiple selected options."})
+
+        return data

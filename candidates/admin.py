@@ -1,7 +1,8 @@
 from django.contrib import admin
 from .models import (Candidate, CV, CVData, Job, JobSearch, Payment, CreditPurchase, Template, Keyword, Location,
                      ScrapingSetting, Pack, Price, CreditAction, KeywordLocationCombination, Favorite, AbstractTemplate,
-                     Ad, GeneralSetting, SearchTerm, UserProfile)
+                     Ad, GeneralSetting, SearchTerm, UserProfile, Language, Question, AnswerSet,
+                     AnswerOption, CandidateResponse, Career, CareerTranslation, CandidateCareer)
 from django.db import models
 from django_json_widget.widgets import JSONEditorWidget
 from import_export import resources, fields
@@ -9,6 +10,9 @@ from import_export.admin import ImportExportModelAdmin
 from datetime import datetime
 import logging
 from import_export import widgets
+from django import forms
+from django.core.exceptions import ValidationError
+
 
 
 logger = logging.getLogger(__name__)
@@ -299,3 +303,215 @@ class FavoriteAdmin(admin.ModelAdmin):
 @admin.register(SearchTerm)
 class SearchTermAdmin(admin.ModelAdmin):
     list_display = ['candidate', 'term', 'is_active', 'last_searched_at']
+
+
+@admin.register(Language)
+class LanguageAdmin(admin.ModelAdmin):
+    list_display = ("code", "name")
+
+
+class QuestionAdminForm(forms.ModelForm):
+    existing_identifiers = forms.ChoiceField(
+        required=False,
+        label="Existing Group Identifier",
+        help_text="Select an existing group identifier to auto-fill."
+    )
+
+    class Meta:
+        model = Question
+        fields = '__all__'  # Ensure group_identifier is first
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        # Fetch unique existing group identifiers
+        existing_identifiers = list(Question.objects.values_list('group_identifier', flat=True).distinct())
+
+        # Set choices dynamically
+        self.fields['existing_identifiers'].choices = [("", "Select an existing identifier")] + [
+            (identifier, identifier) for identifier in existing_identifiers
+        ]
+
+        # Ensure the field order is correct
+        field_order = list(self.fields.keys())
+
+        # Remove existing_identifiers if already at the bottom
+        if "existing_identifiers" in field_order:
+            field_order.remove("existing_identifiers")
+
+        # Insert it right after "group_identifier"
+        field_order.insert(field_order.index("group_identifier") + 1, "existing_identifiers")
+        # Apply the new order
+        self.order_fields(field_order)
+
+        # Add randomization buttons (Customizing widget rendering)
+        self.fields["group_identifier"].widget.attrs["data-randomize"] = "true"
+
+    def clean(self):
+        cleaned_data = super().clean()
+        existing_identifier = cleaned_data.get("existing_identifiers")
+        group_identifier = cleaned_data.get("group_identifier")
+        language = cleaned_data.get("language")
+        answer_set = cleaned_data.get("answer_set")  # Get the selected answer set
+
+        # Auto-fill group identifier if selected
+        if existing_identifier:
+            cleaned_data["group_identifier"] = existing_identifier
+
+        # Exclude current instance when checking for duplicates (avoid validation on update)
+        query = Question.objects.filter(group_identifier=cleaned_data["group_identifier"], language=language)
+        if self.instance.pk:  # If updating (not creating), exclude the current instance
+            query = query.exclude(pk=self.instance.pk)
+
+        # Prevent duplicate question with the same group_identifier and language
+        if query.exists():
+            raise ValidationError("A question with this Group Identifier and Language already exists.")
+
+        # 🔹 **Validation: Ensure the selected Answer Set has the same language as the Question**
+        if answer_set and answer_set.language != language:
+            raise ValidationError("The selected Answer Set must have the same language as the Question.")
+
+        return cleaned_data
+
+    class Media:
+        js = ("admin/js/question_identifier_randomizer.js",)
+
+
+@admin.register(Question)
+class QuestionAdmin(admin.ModelAdmin):
+    fields = [
+        "group_identifier",
+        "existing_identifiers",
+        "language",
+        "name",
+        "text",
+        "description",
+        "question_type",
+        "required",
+        "answer_set",
+    ]
+    form = QuestionAdminForm
+    list_display = ("name", "language", "group_identifier")
+    list_filter = ("language", "group_identifier")
+    search_fields = ("name", "group_identifier")
+
+    class Media:
+        js = ("admin/js/question_admin.js", "admin/js/fill_answer_set_fields.js")
+
+
+class AnswerOptionInline(admin.TabularInline):
+    model = AnswerOption
+    extra = 3
+
+
+@admin.register(AnswerSet)
+class AnswerSetAdmin(admin.ModelAdmin):
+    list_display = ("name", "language")
+
+    def get_changeform_initial_data(self, request):
+        """
+        This method is called by the admin when rendering the Add/Change form.
+        We can look at GET params and use them to populate initial field values.
+        """
+        initial = super().get_changeform_initial_data(request)
+
+        # Grab our custom query params (if any) that we appended
+        prefill_group_identifier = request.GET.get("prefill_group_identifier")
+        prefill_name = request.GET.get("prefill_name")
+        prefill_language = request.GET.get("prefill_language")
+
+        # Use them to populate defaults for new AnswerSet
+        if prefill_group_identifier:
+            initial["group_identifier"] = prefill_group_identifier
+        if prefill_name:
+            initial["name"] = prefill_name
+        if prefill_language:
+            initial["language"] = prefill_language
+
+        return initial
+
+    inlines = [AnswerOptionInline]
+
+
+@admin.register(AnswerOption)
+class AnswerOptionAdmin(admin.ModelAdmin):
+    list_display = ("answer_set", "text")
+
+
+class CandidateResponseAdminForm(forms.ModelForm):
+    class Meta:
+        model = CandidateResponse
+        fields = '__all__'
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        # Initially, clear choices for selected_option and selected_options
+        self.fields["selected_option"].queryset = AnswerOption.objects.none()
+        self.fields["selected_options"].queryset = AnswerOption.objects.none()
+
+        # If updating an instance, prepopulate valid options
+        if self.instance and self.instance.question_id:
+            answer_set = self.instance.question.answer_set
+            question_type = self.instance.question.question_type if self.instance.question else None
+
+            if answer_set:
+                answer_options = AnswerOption.objects.filter(answer_set=answer_set)
+
+                # Dynamically set options based on question type
+                if question_type == Question.RADIO:
+                    self.fields["selected_option"].queryset = answer_options
+                    self.fields["selected_options"].widget.attrs["disabled"] = True
+                elif question_type == Question.CHECKBOX:
+                    self.fields["selected_options"].queryset = answer_options
+                    self.fields["selected_option"].widget.attrs["disabled"] = True
+
+    def clean(self):
+        """
+        Ensures that only ONE response type is provided per question and that the answer type aligns with the question type.
+        """
+        cleaned_data = super().clean()
+        text_answer = cleaned_data.get("text_answer")
+        selected_option = cleaned_data.get("selected_option")
+        selected_options = cleaned_data.get("selected_options")
+
+        # Count the number of filled fields
+        filled_fields = [field for field in [text_answer, selected_option, selected_options] if field]
+        if len(filled_fields) > 1:
+            raise ValidationError("Only one response type (text, single choice, multiple choices) can be filled.")
+
+        # Validate based on question type
+        question = cleaned_data.get("question")
+        if question:
+            if question.question_type == Question.RADIO and not selected_option:
+                raise ValidationError("For radio-type questions, you must select a single option.")
+            if question.question_type == Question.CHECKBOX and not selected_options:
+                raise ValidationError("For checkbox-type questions, you must select at least one option.")
+            if question.question_type == Question.TEXT and not text_answer:
+                raise ValidationError("For text-based questions, a text answer must be provided.")
+
+        return cleaned_data
+
+
+@admin.register(CandidateResponse)
+class CandidateResponseAdmin(admin.ModelAdmin):
+    form = CandidateResponseAdminForm
+    list_display = ("candidate", "question", "text_answer", "selected_option", "selected_options")
+
+    class Media:
+        js = ("admin/js/filter_answer_options.js",)
+
+
+@admin.register(Career)
+class CareerAdmin(admin.ModelAdmin):
+    list_display = ("group_identifier",)
+
+
+@admin.register(CareerTranslation)
+class CareerTranslationAdmin(admin.ModelAdmin):
+    list_display = ("title", "career", "language")
+
+
+@admin.register(CandidateCareer)
+class CandidateCareerAdmin(admin.ModelAdmin):
+    list_display = ("candidate", "career")

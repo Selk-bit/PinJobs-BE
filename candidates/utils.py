@@ -1355,3 +1355,90 @@ def generate_cv_pdf(cv):
     finally:
         if driver:
             driver.quit()
+
+
+def construct_career_guidance_prompt(candidate_profile, stepper_responses, languages):
+    """
+    Constructs an AI prompt for Gemini to generate personalized career paths and step-by-step guidance.
+    The response intelligently adapts based on the availability of stepper responses.
+    """
+
+    # Check if stepper responses exist
+    stepper_data_present = bool(stepper_responses)
+
+    prompt = f"""
+    You are an **advanced AI career advisor**. Your task is to analyze a candidate’s resume and responses to career-related questions.
+    Based on this data, **propose 10 specific career paths** that the candidate can transition into and provide **detailed, personalized steps** to achieve those careers.
+
+    ### **Candidate Profile**
+    - This includes their resume information (skills, education, work experience, certifications, etc.).
+    - Some details might be missing; **do not fabricate missing information** but utilize all available data to provide tailored advice.
+
+    **Candidate's Resume Data:**
+    {json.dumps(candidate_profile, indent=4, ensure_ascii=False)}
+    """
+
+    if stepper_data_present:
+        prompt += f"""
+        ### **Candidate's Career Preferences**
+        - The candidate has also answered several career-related questions.
+        - Use these answers to understand their goals, motivations, and preferred industries.
+
+        **Candidate's Stepper Responses:**
+        {json.dumps(stepper_responses, indent=4, ensure_ascii=False)}
+        """
+    else:
+        prompt += """
+        ### **Missing Stepper Responses**
+        - The candidate has not provided additional career preference responses.
+        - Base all recommendations **solely on the resume data**.
+        - If multiple career paths are possible, focus on **paths that align closely with existing skills and experience**.
+        """
+
+    prompt += f"""
+    ### **Your Task**
+    1. **List exactly 10 career paths that fit the candidate.** These should align with their education, skills, and interests.
+    2. **For each career, provide a clear, personalized roadmap on how to transition into it.**
+    3. **Ensure that each step is specific and directly applicable to the candidate's background.**
+    4. **Avoid general advice; focus on actionable steps tailored to the candidate's unique profile.**
+    5. **If transitioning to this career requires learning new skills, recommend specific courses, certifications, or projects to work on.**
+    6. **If switching industries, suggest a structured plan (e.g., diplomas to obtain based the candidate's education and location, networking tips, job search strategies).**
+    7. **Translate each career path into multiple languages.**
+
+    ### **Response Format (JSON)**
+    ```json
+    [
+        {{
+            "career_title": "<Career Job Title>",
+            "languages": {{
+                "en": {{
+                    "title": "<Career Job Title in English>",
+                    "transition_path": "<Step-by-step guide in English>"
+                }},
+                "fr": {{
+                    "title": "<Career Job Title in French>",
+                    "transition_path": "<Step-by-step guide in French>"
+                }},
+                "es": {{
+                    "title": "<Career Job Title in Spanish>",
+                    "transition_path": "<Step-by-step guide in Spanish>"
+                }}
+            }}
+        }}
+    ]
+    ```
+
+    **Available Languages:**
+    - You must provide career titles and transition paths in the following languages: {json.dumps(languages, ensure_ascii=False)}
+    - Ensure that translations are natural and culturally appropriate.
+
+    **Important Guidelines:**
+    - **Do not generate fake information.** Base suggestions strictly on the candidate’s data.
+    - **Avoid generic advice.** Each recommendation should be specific to the candidate's profile.
+    - **Consider the candidate's location** if mentioned, and provide region-specific advice (e.g., relevant certifications, local job market trends).
+    - **Return only a JSON response**, formatted exactly as described.
+
+    **Now generate the career recommendations with detailed, personalized transition roadmaps.**
+    """
+
+    return prompt
