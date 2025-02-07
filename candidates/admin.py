@@ -259,8 +259,8 @@ class LocationAdmin(admin.ModelAdmin):
 
 @admin.register(GeneralSetting)
 class GeneralSettingAdmin(admin.ModelAdmin):
-    list_display = ['ads_per_page', 'max_recent_search_terms', 'credits_to_start_with', 'last_updated']
-    list_editable = ['ads_per_page', 'max_recent_search_terms', 'credits_to_start_with']
+    list_display = ['ads_per_page', 'max_recent_search_terms', 'last_updated']
+    list_editable = ['ads_per_page', 'max_recent_search_terms']
     list_display_links = None
     help_texts = {"ads_per_page": "Set the number of ads displayed on each page."}
 
