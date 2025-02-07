@@ -34,11 +34,6 @@ class Migration(migrations.Migration):
                 ('name', models.CharField(max_length=50, unique=True)),
             ],
         ),
-        migrations.AddField(
-            model_name='generalsetting',
-            name='credits_to_start_with',
-            field=models.PositiveIntegerField(default=0, help_text='Number of credits to start with'),
-        ),
         migrations.CreateModel(
             name='AnswerOption',
             fields=[
