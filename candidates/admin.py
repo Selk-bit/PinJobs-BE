@@ -496,7 +496,7 @@ class CandidateResponseAdminForm(forms.ModelForm):
 @admin.register(CandidateResponse)
 class CandidateResponseAdmin(admin.ModelAdmin):
     form = CandidateResponseAdminForm
-    list_display = ("candidate", "question", "text_answer", "selected_option", "selected_options")
+    list_display = ("candidate", "question")
 
     class Media:
         js = ("admin/js/filter_answer_options.js",)
