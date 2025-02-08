@@ -1367,43 +1367,78 @@ def construct_career_guidance_prompt(candidate_profile, stepper_responses, langu
     stepper_data_present = bool(stepper_responses)
 
     prompt = f"""
-    You are an **advanced AI career advisor**. Your task is to analyze a candidate’s resume and responses to career-related questions.
-    Based on this data, **propose 10 specific career paths** that the candidate can transition into and provide **detailed, personalized steps** to achieve those careers.
+    You are an **advanced AI career advisor**. Your job is to analyze a candidate’s resume and responses to career-related questions.
+    Based on this data, **identify the 10 best career paths** that the candidate can transition into and provide **structured, step-by-step guidance**.
+
+    **To ensure consistency, use the following ranking formula to score each career path:**
+
+    - **Skills Match (35%)**: How well does the candidate’s current skillset align with the career requirements?
+    - **Education Alignment (20%)**: Does the candidate’s degree or certifications match the field?
+    - **Candidate Preferences (25%)**: Does the career match what the candidate explicitly wants (from stepper responses)?
+    - **Industry Switch Feasibility (15%)**: Can the candidate realistically transition into this career with minimal retraining?
+    - **Relevant Experience (5%)**: Does the candidate have past work experience that is useful for this career?
+
+    **Each potential career should be scored using this exact formula, and only the top 10 careers with the highest scores should be returned.**
 
     ### **Candidate Profile**
-    - This includes their resume information (skills, education, work experience, certifications, etc.).
-    - Some details might be missing; **do not fabricate missing information** but utilize all available data to provide tailored advice.
-
-    **Candidate's Resume Data:**
+    **Resume Data:**
     {json.dumps(candidate_profile, indent=4, ensure_ascii=False)}
     """
 
     if stepper_data_present:
         prompt += f"""
         ### **Candidate's Career Preferences**
-        - The candidate has also answered several career-related questions.
+        - The candidate has also answered career-related questions.
         - Use these answers to understand their goals, motivations, and preferred industries.
 
-        **Candidate's Stepper Responses:**
+        **Stepper Responses:**
         {json.dumps(stepper_responses, indent=4, ensure_ascii=False)}
         """
     else:
         prompt += """
         ### **Missing Stepper Responses**
-        - The candidate has not provided additional career preference responses.
+        - The candidate has not provided career preference responses.
         - Base all recommendations **solely on the resume data**.
         - If multiple career paths are possible, focus on **paths that align closely with existing skills and experience**.
         """
 
     prompt += f"""
     ### **Your Task**
-    1. **List exactly 10 career paths that fit the candidate.** These should align with their education, skills, and interests.
-    2. **For each career, provide a clear, personalized roadmap on how to transition into it.**
-    3. **Ensure that each step is specific and directly applicable to the candidate's background.**
-    4. **Avoid general advice; focus on actionable steps tailored to the candidate's unique profile.**
-    5. **If transitioning to this career requires learning new skills, recommend specific courses, certifications, or projects to work on.**
-    6. **If switching industries, suggest a structured plan (e.g., diplomas to obtain based the candidate's education and location, networking tips, job search strategies).**
-    7. **Translate each career path into multiple languages.**
+    1. **List exactly 10 career paths that fit the candidate, based on the highest scoring results.**
+    2. **Provide a structured transition roadmap for each career.**
+    3. **Each roadmap should be precise, actionable, and tailored to the candidate's background.**
+    4. **Translate each career path into multiple languages.**
+
+    ### **Career Transition Plan**
+    **For each suggested career, follow this structured roadmap:**
+
+    - **Step 1: Analyze Current Profile**  
+      - Identify which of the candidate’s existing skills and experiences are already relevant.
+      - Explain why the candidate is a good fit for this career.
+
+    - **Step 2: Identify Key Knowledge Gaps**  
+      - List any missing skills, certifications, or industry knowledge.
+      - Recommend specific online courses, books, or workshops.
+
+    - **Step 3: Hands-on Practice & Projects**  
+      - Suggest small personal projects, freelance work, or internships to gain experience.
+      - If applicable, recommend open-source contributions or industry certifications.
+
+    - **Step 4: Build a Portfolio & Resume Adjustments**  
+      - Guide the candidate on how to update their resume and LinkedIn.
+      - Recommend specific portfolio projects that showcase relevant skills.
+
+    - **Step 5: Networking & Industry Engagement**  
+      - Provide networking strategies (e.g., LinkedIn connections, industry events, meetups).
+      - Suggest professional communities or mentorship programs.
+
+    - **Step 6: Applying for Jobs & Career Entry**  
+      - Offer strategies for how to break into the field (e.g., starting with a junior role, freelance work, etc.).
+      - If switching industries, suggest a gradual transition plan.
+
+    - **Step 7: Long-Term Growth & Career Stability**  
+      - Advise on how to grow in this career (certifications, advanced degrees, specialization paths).
+      - Recommend a **5-year career trajectory** for sustained success.
 
     ### **Response Format (JSON)**
     ```json
@@ -1413,15 +1448,15 @@ def construct_career_guidance_prompt(candidate_profile, stepper_responses, langu
             "languages": {{
                 "en": {{
                     "title": "<Career Job Title in English>",
-                    "transition_path": "<Step-by-step guide in English>"
+                    "transition_path": "<Step-by-step career transition roadmap in English>"
                 }},
                 "fr": {{
                     "title": "<Career Job Title in French>",
-                    "transition_path": "<Step-by-step guide in French>"
+                    "transition_path": "<Step-by-step career transition roadmap in French>"
                 }},
                 "es": {{
                     "title": "<Career Job Title in Spanish>",
-                    "transition_path": "<Step-by-step guide in Spanish>"
+                    "transition_path": "<Step-by-step career transition roadmap in Spanish>"
                 }}
             }}
         }}
@@ -1430,15 +1465,16 @@ def construct_career_guidance_prompt(candidate_profile, stepper_responses, langu
 
     **Available Languages:**
     - You must provide career titles and transition paths in the following languages: {json.dumps(languages, ensure_ascii=False)}
-    - Ensure that translations are natural and culturally appropriate.
+    - Ensure translations are natural and culturally appropriate.
 
     **Important Guidelines:**
-    - **Do not generate fake information.** Base suggestions strictly on the candidate’s data.
-    - **Avoid generic advice.** Each recommendation should be specific to the candidate's profile.
-    - **Consider the candidate's location** if mentioned, and provide region-specific advice (e.g., relevant certifications, local job market trends).
+    - **Use the exact scoring formula** to ensure deterministic results.  
+    - **Do not generate random careers**—return the same careers for the same input.  
+    - **Avoid generic advice.** Each recommendation should be tailored to the candidate’s profile.  
+    - **Consider the candidate's location** if mentioned, and provide region-specific advice.  
     - **Return only a JSON response**, formatted exactly as described.
 
-    **Now generate the career recommendations with detailed, personalized transition roadmaps.**
+    **Now generate the career recommendations using the ranking formula and structured roadmaps.**
     """
 
     return prompt
