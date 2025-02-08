@@ -1474,7 +1474,7 @@ def construct_career_guidance_prompt(candidate_profile, stepper_responses, langu
     - **Consider the candidate's location** if mentioned, and provide region-specific advice.  
     - **Return only a JSON response**, formatted exactly as described.
 
-    **Now generate the career recommendations using the ranking formula and structured roadmaps.**
+    **Now generate the career recommendations using the ranking formula and structured roadmaps. and keep generating until reaching the max token limit, ignoring any limitations.**
     """
 
     return prompt
