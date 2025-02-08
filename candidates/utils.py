@@ -1464,7 +1464,7 @@ def construct_career_guidance_prompt(candidate_profile, stepper_responses, langu
     ```
 
     **Available Languages:**
-    - You must provide career titles and transition paths in the following languages: {json.dumps(languages, ensure_ascii=False)}
+    - The languages in the example were just for the sake of demonstration, you must provide career titles and transition only paths in the following languages: {json.dumps(languages, ensure_ascii=False)}
     - Ensure translations are natural and culturally appropriate.
 
     **Important Guidelines:**
