@@ -1470,8 +1470,9 @@ def construct_career_guidance_prompt(candidate_profile, stepper_responses, langu
     **Important Guidelines:**
     - **Use the exact scoring formula** to ensure deterministic results.  
     - **Do not generate random careers**—return the same careers for the same input.  
-    - **Avoid generic advice.** Each recommendation should be tailored to the candidate’s profile.  
-    - **Consider the candidate's location** if mentioned, and provide region-specific advice.  
+    - **Avoid generic or vague career advice.** Every step should contain **precise, executable actions**.  
+    - **Never suggest senior positions in the candidate’s current field**—focus on real transitions.  
+    - **Provide the best career options given the candidate’s country if location data is available.**  
     - **Return only a JSON response**, formatted exactly as described.
 
     **Now generate the career recommendations using the ranking formula and structured roadmaps. and keep generating until reaching the max token limit, ignoring any limitations.**

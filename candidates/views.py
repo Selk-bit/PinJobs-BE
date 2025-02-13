@@ -67,6 +67,7 @@ from django.utils.html import strip_tags
 from django.utils.text import slugify
 import random
 import string
+import re
 
 
 class EmailVerificationTokenGenerator(PasswordResetTokenGenerator):
@@ -4020,14 +4021,37 @@ class ResponsesView(APIView):
 
         try:
             gemini_response = get_gemini_response(prompt)
-            print(gemini_response)
             gemini_response = (gemini_response.split("```json")[-1]).split("```")[0]
-            career_data = json.loads(gemini_response)
+            try:
+                career_data = json.loads(gemini_response)
+            except json.JSONDecodeError:
+                # 🔹 **Handle incomplete JSON response**
+                print("⚠️ Gemini response truncated: Attempting to fix JSON...")
+
+                # Find only well-formed JSON objects (handling nested structures)
+                matches = re.findall(r'\{\s*"career_title"\s*:\s*".+?"\s*,\s*"languages"\s*:\s*\{.+?\}\s*\}',
+                                     gemini_response, re.DOTALL)
+
+                # Ensure we reconstruct a valid JSON array
+                if matches:
+                    corrected_json = "[" + ", ".join(matches) + "]"
+                    try:
+                        career_data = json.loads(corrected_json)
+                        return career_data
+                    except json.JSONDecodeError:
+                        return Response({"error": "Failed to recover valid JSON from Gemini response."},
+                                    status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+                else:
+                    return Response({"error": "Gemini response was truncated and could not be recovered."},
+                                    status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
         except Exception as e:
             return Response({"error": f"Failed to fetch career recommendations from Gemini: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         # Store career recommendations efficiently
         created_careers = []
+        print(career_data)
         for career_info in career_data:
             # Ensure unique group_identifier by slugifying + adding a random suffix
             slug = slugify(career_info["career_title"])
