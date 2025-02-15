@@ -1479,3 +1479,62 @@ def construct_career_guidance_prompt(candidate_profile, stepper_responses, langu
     """
 
     return prompt
+
+
+def robust_json_repair(gemini_response: str) -> list:
+    """
+    Attempt to extract a valid JSON array from gemini_response,
+    dropping any malformed trailing fragments.
+    Returns a Python list if successful, or an empty list if unrecoverable.
+    """
+
+    # 1) Locate the first '['
+    start = gemini_response.find("[")
+    if start == -1:
+        # There's no array at all
+        return []
+
+    # 2) Locate the last ']' (if any)
+    end = gemini_response.rfind("]")
+
+    # If there's no closing bracket, let's treat everything after '[' as part of the array
+    # Then we can try to fix it by appending ']' and removing partial objects if needed
+    if end == -1 or end < start:
+        candidate = gemini_response[start:]  # everything after '['
+        # We'll forcibly append a closing bracket
+        candidate = candidate.rstrip() + "]"
+    else:
+        # We found a closing bracket, use the substring from '[' to that ']'
+        candidate = gemini_response[start:end+1]
+
+    candidate = candidate.strip()
+
+    # 3) Try parsing as-is
+    try:
+        return json.loads(candidate)
+    except json.JSONDecodeError:
+        pass  # We'll try incremental trimming
+
+    # 4) Incremental repair loop
+    while True:
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            # Find the last opening brace
+            last_brace_pos = candidate.rfind('{')
+            if last_brace_pos == -1:
+                # no more '{' to remove
+                break
+
+            # Drop everything from that brace to the end
+            candidate = candidate[:last_brace_pos]
+
+            # Remove trailing commas if we end with "...},"
+            candidate = re.sub(r',\s*\]?$', '', candidate)
+
+            # Ensure we close the array properly
+            candidate = candidate.rstrip()
+            if not candidate.endswith(']'):
+                candidate += ']'
+
+    return []

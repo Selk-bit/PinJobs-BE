@@ -74,3 +74,25 @@ DEFAULT_TEMPLATE_DATA = {
 }
 FRONTEND_PREVIEW_URL = "https://pinjobs-frontend.onrender.com/resume-preview/"
 FRONTEND_BASE_URL = "https://pinjobs-frontend.onrender.com"
+
+WELCOME_QUESTION = {
+    "question_type": "welcome",
+    "name": "Welcome",
+    "text": "Welcome to Career AI Coach!",
+    "description": "Navigate your career with AI-powered guidance. Identify opportunities and milestones to shape your professional journey.",
+}
+
+SELECT_RESUME_QUESTION = {
+    "question_type": "select-resume",
+    "name": "Select Resume",
+    "text": "Select a Resume",
+    "description": "We will use your resume to learn about you and suggest personalized career paths.",
+    "choice": 0,
+}
+
+FINISH_QUESTION = {
+    "question_type": "finish",
+    "name": "Career AI Coach Ready",
+    "text": "Your Career AI Coach is Ready!",
+    "description": "You can change the resume your AI coach is based on as well as your customization via preferences.",
+}

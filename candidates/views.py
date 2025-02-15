@@ -19,7 +19,7 @@ from django.db.models.signals import post_save
 from django.conf import settings
 import os
 from .utils import (get_gemini_response, deduct_credits, has_sufficient_credits, construct_only_score_job_prompt,
-                    construct_similarity_prompt, generate_cv_pdf, construct_career_guidance_prompt)
+                    construct_similarity_prompt, generate_cv_pdf, construct_career_guidance_prompt, robust_json_repair)
 import json
 from .tasks import run_scraping_task
 from django.contrib.auth import authenticate
@@ -59,7 +59,7 @@ from allauth.socialaccount.helpers import complete_social_login
 from rest_framework_simplejwt.tokens import RefreshToken
 from allauth.socialaccount.models import SocialLogin
 from django.db.models.functions import Lower
-from .constants import FRONTEND_BASE_URL
+from .constants import FRONTEND_BASE_URL, WELCOME_QUESTION, SELECT_RESUME_QUESTION, FINISH_QUESTION
 from typing import Dict
 from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
@@ -3857,9 +3857,21 @@ class QuestionsView(APIView):
             return Response({"error": "Invalid language code."}, status=status.HTTP_400_BAD_REQUEST)
 
         questions = Question.objects.filter(language=language).order_by("id")
-        serializer = QuestionSerializer(questions, many=True)
+        serialized_questions = QuestionSerializer(questions, many=True).data
 
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        # Append `choice` key based on question type
+        for question in serialized_questions:
+            if question["question_type"] in ["radio", "dropdown"]:
+                question["choice"] = 0
+            elif question["question_type"] == "checkbox":
+                question["choice"] = []
+            else:
+                question["choice"] = ""
+
+        # Append constants at the top and bottom
+        response_data = [WELCOME_QUESTION, SELECT_RESUME_QUESTION] + serialized_questions + [FINISH_QUESTION]
+
+        return Response(response_data, status=status.HTTP_200_OK)
 
 
 class QuestionTranslationsView(APIView):
@@ -3954,20 +3966,19 @@ class ResponsesView(APIView):
         answer_options = {opt.id: opt for opt in AnswerOption.objects.filter(answer_set__in=[q.answer_set for q in questions.values() if q.answer_set])}
 
         # 🔹 **Bulk Create / Update Processing**
-        response_instances = []
         new_responses = []
-        m2m_data = []
         errors = []
 
         for response_data in responses_data:
             try:
-                question = questions.get(response_data["question_id"])
+                question_id = response_data.get("question_id")
+                question = questions.get(question_id)
                 if not question:
                     errors.append({"question_id": response_data["question_id"], "error": "Question not found."})
                     continue
 
                 existing_response = existing_responses.get((question.id, candidate.id))
-                response_dict = {"candidate": candidate, "question": question}
+                response_dict = {"candidate": candidate.id, "question": question}
 
                 # Validate that only one response type is filled
                 filled_fields = [field for field in ["text_answer", "selected_option", "selected_options"] if response_data.get(field)]
@@ -3978,33 +3989,102 @@ class ResponsesView(APIView):
                 # Assign values based on question type
                 if "text_answer" in response_data:
                     response_dict["text_answer"] = response_data["text_answer"]
-                if "selected_option" in response_data:
-                    response_dict["selected_option"] = answer_options.get(response_data["selected_option"])
 
-                selected_options = list(filter(None, [answer_options.get(opt_id) for opt_id in response_data.get("selected_options", [])]))
+                if "selected_option" in response_data:
+                    opt_id = response_data["selected_option"]
+                    selected_option_obj = answer_options.get(opt_id)
+                    if not selected_option_obj:
+                        errors.append({
+                            "question_id": question.id,
+                            "selected_option_id": opt_id,
+                            "error": f"Option with ID {opt_id} was not found for question {question.id}."
+                        })
+                        continue
+                    response_dict["selected_option"] = selected_option_obj.id if selected_option_obj else None
+
+
+                if "selected_options" in response_data:
+                    selected_options_ids = response_data["selected_options"] or []
+                    selected_option_objs = []
+                    for opt_id in selected_options_ids:
+                        option_obj = answer_options.get(opt_id)
+                        if not option_obj:
+                            errors.append({
+                                "question_id": question.id,
+                                "selected_option_id": opt_id,
+                                "error": f"Option with ID {opt_id} was not found for question {question.id}."
+                            })
+                            # We can either break or continue collecting errors for other options
+                            break
+                        selected_option_objs.append(option_obj)
+                    else:
+                        # Only assign if no errors
+                        if selected_option_objs:
+                            response_dict["selected_options"] = [opt.id for opt in selected_option_objs]
 
                 # Bulk create/update responses
                 if existing_response:
-                    serializer = CandidateResponseSerializer(instance=existing_response, data=response_dict, partial=True)
+                    serializer = CandidateResponseSerializer(instance=existing_response, data=response_dict, context={"question": question}, partial=True)
                     if serializer.is_valid():
-                        response_instances.append(serializer.save())
+                        new_response = serializer.save()
+                else:
+                    # new_response = CandidateResponse.objects.create(**response_dict)
+                    serializer = CandidateResponseSerializer(
+                        data=response_dict,
+                        context={"question": question}
+                    )
+                    if serializer.is_valid():
+                        new_response = serializer.save(
+                            candidate=candidate,
+                            question=question
+                        )
+                        new_responses.append(new_response)
                     else:
                         errors.append(serializer.errors)
-                else:
-                    new_response = CandidateResponse.objects.create(**response_dict)
-                    new_responses.append(new_response)
-                    if selected_options:
-                        m2m_data.append((new_response, selected_options))
 
             except AnswerOption.DoesNotExist:
                 errors.append({"error": "One or more selected options do not exist."})
 
-        # Bulk update Many-to-Many Fields
-        for response, selected_options in m2m_data:
-            response.selected_options.set(selected_options)
-
         if errors:
             return Response({"errors": errors}, status=status.HTTP_400_BAD_REQUEST)
+
+        existing_careers_qs = CandidateCareer.objects.filter(candidate=candidate).select_related("career")
+
+        if existing_careers_qs.exists():
+            # We'll build the same structure as the "created_careers" in your code:
+            existing_careers_list = []
+
+            # For each CandidateCareer, get the associated Career & translations
+            for candidate_career in existing_careers_qs:
+                career = candidate_career.career  # The actual Career record
+                translations_list = []
+                for translation in career.translations.all():
+                    translations_list.append({
+                        "language": translation.language.code,
+                        "title": translation.title,
+                        "transition_path": translation.transition_path
+                    })
+
+                # We can choose whichever "default" or "main" career_title to show,
+                # e.g., the English translation or the first one found:
+                # Or store them all, depending on your front-end needs
+                # For consistency, let's pick the English version as "career_title"
+                english_translation = career.translations.filter(language__code="en").first()
+                if english_translation:
+                    top_title = english_translation.title
+                else:
+                    # fallback: first translation's title or the group_identifier
+                    top_title = translations_list[0]["title"] if translations_list else career.group_identifier
+
+                existing_careers_list.append({
+                    "career_title": top_title,
+                    "translations": translations_list,
+                })
+
+            return Response({
+                "message": "Responses submitted/updated successfully. Candidate already has career(s).",
+                "careers": existing_careers_list
+            }, status=status.HTTP_200_OK)
 
         # Fetch newly saved responses efficiently
         stepper_responses = CandidateResponse.objects.filter(candidate=candidate).values(
@@ -4027,25 +4107,7 @@ class ResponsesView(APIView):
             except json.JSONDecodeError:
                 # 🔹 **Handle incomplete JSON response**
                 print("⚠️ Gemini response truncated: Attempting to fix JSON...")
-
-                # Find only well-formed JSON objects (handling nested structures)
-                matches = re.findall(r'\{\s*"career_title"\s*:\s*".+?"\s*,\s*"languages"\s*:\s*\{.+?\}\s*\}',
-                                     gemini_response, re.DOTALL)
-
-                # Ensure we reconstruct a valid JSON array
-                if matches:
-                    corrected_json = "[" + ", ".join(matches) + "]"
-                    try:
-                        career_data = json.loads(corrected_json)
-                        return career_data
-                    except json.JSONDecodeError:
-                        return Response({"error": "Failed to recover valid JSON from Gemini response."},
-                                    status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-                else:
-                    return Response({"error": "Gemini response was truncated and could not be recovered."},
-                                    status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
+                career_data = robust_json_repair(gemini_response)
         except Exception as e:
             return Response({"error": f"Failed to fetch career recommendations from Gemini: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
