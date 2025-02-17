@@ -5,7 +5,7 @@ from .models import (Keyword, Location, KeywordLocationCombination, CV, Template
 from django.contrib.auth.models import User
 from .constants import DEFAULT_TEMPLATE_DATA
 from .utils import (generate_cv_pdf, construct_only_score_job_prompt, construct_candidate_profile,
-                    get_gemini_response, construct_similarity_prompt)
+                    get_gemini_response, construct_similarity_prompt, detect_cv_language)
 import json
 from datetime import datetime
 
@@ -46,8 +46,16 @@ def create_default_template(sender, instance, created, **kwargs):
                     job_title = instance.job.title if instance.job.title else "Untitled Job"
                     company_name = instance.job.company_name if instance.job.company_name else "Unknown Company"
                     instance.name = f"{job_title} - {company_name}"
+                elif instance.career:
+                    base_cv = CV.objects.filter(candidate=instance.candidate, cv_type=CV.BASE).first()
+                    if base_cv:
+                        base_cv_lang = detect_cv_language(base_cv.cv_data)
+                        career_translation = instance.career.translations.filter(language__code=base_cv_lang).first()
+                        instance.name = f"{career_translation.title} - Tailored CV" if career_translation else "Untitled"
+                    else:
+                        instance.name = "Untitled - Tailored CV"
                 else:
-                    instance.name = "Untitled"
+                    instance.name = "Untitled - Tailored CV"
             else:
                 instance.name = "Untitled"
 

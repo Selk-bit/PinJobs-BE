@@ -41,6 +41,7 @@ from django.core.files.base import ContentFile
 from io import BytesIO
 from pdf2image import convert_from_bytes
 import string
+from langdetect import detect, LangDetectException
 
 
 ua = UserAgent()
@@ -1357,7 +1358,7 @@ def generate_cv_pdf(cv):
             driver.quit()
 
 
-def construct_career_guidance_prompt(candidate_profile, stepper_responses, languages):
+def construct_career_guidance_prompt(candidate_profile, stepper_responses, languages, num_of_careers_to_generate=5):
     """
     Constructs an AI prompt for Gemini to generate personalized career paths and step-by-step guidance.
     The response intelligently adapts based on the availability of stepper responses.
@@ -1404,7 +1405,7 @@ def construct_career_guidance_prompt(candidate_profile, stepper_responses, langu
 
     prompt += f"""
     ### **Your Task**
-    1. **List exactly 10 career paths that fit the candidate, based on the highest scoring results.**
+    1. **List exactly {num_of_careers_to_generate + 1} career paths that fit the candidate, based on the highest scoring results.**
     2. **Provide a structured transition roadmap for each career.**
     3. **Each roadmap should be precise, actionable, and tailored to the candidate's background.**
     4. **Translate each career path into multiple languages.**
@@ -1473,9 +1474,10 @@ def construct_career_guidance_prompt(candidate_profile, stepper_responses, langu
     - **Avoid generic or vague career advice.** Every step should contain **precise, executable actions**.  
     - **Never suggest senior positions in the candidate’s current field**—focus on real transitions.  
     - **Provide the best career options given the candidate’s country if location data is available.**  
-    - **Return only a JSON response**, formatted exactly as described.
+    - **The transition path text should be formatted in adequate html tags, but returned as a string, without ever using double quotes inside its text.**
+    - **Return only a JSON response**, formatted exactly as described.**
 
-    **Now generate the career recommendations using the ranking formula and structured roadmaps. and keep generating until reaching the max token limit, ignoring any limitations.**
+    **Now generate the career recommendations using the ranking formula and structured roadmaps. and keep generating until reaching the max token limit (in case the {num_of_careers_to_generate + 1} careers output was longer than the output token limit), ignoring any LLM limitations.**
     """
 
     return prompt
@@ -1506,6 +1508,7 @@ def robust_json_repair(gemini_response: str) -> list:
     else:
         # We found a closing bracket, use the substring from '[' to that ']'
         candidate = gemini_response[start:end+1]
+        print(candidate)
 
     candidate = candidate.strip()
 
@@ -1538,3 +1541,163 @@ def robust_json_repair(gemini_response: str) -> list:
                 candidate += ']'
 
     return []
+
+
+def construct_tailored_career_prompt(cv_data_instance, candidate, career_title, career_transition, cv_language):
+    """
+    Build a tailored prompt that instructs Gemini to produce a CV in `cv_language`.
+    Emphasizes synergy between existing candidate skills and career requirements,
+    avoiding fictional data but allowing subtle logical expansions.
+    """
+
+    if cv_data_instance:
+        name = cv_data_instance.name or f"{candidate.first_name} {candidate.last_name}"
+
+        # Existing data from base CV
+        missing_fields = {
+            "age": cv_data_instance.age,
+            "city": cv_data_instance.city,
+            "work": cv_data_instance.work or [],
+            "educations": cv_data_instance.educations or [],
+            "projects": cv_data_instance.projects or [],
+            "interests": cv_data_instance.interests or [],
+            "certifications": cv_data_instance.certifications or [],
+        }
+
+        prompt = f"""
+        You are an advanced AI specializing in creating tailored CVs in a specified language.
+        Please generate an updated CV in '{cv_language}' for a candidate transitioning into a new career.
+
+        **CV Language**: {cv_language}
+        **Career Title**: {career_title}
+        **Career Transition Path**: {career_transition}
+
+        Candidate already has a base CV in {cv_language}, with the following data (all in JSON):
+        - age: {missing_fields['age'] if missing_fields['age'] is not None else "null"}
+        - city: {missing_fields['city'] or ''}
+        - work: {json.dumps(missing_fields['work'], ensure_ascii=False)}
+        - educations: {json.dumps(missing_fields['educations'], ensure_ascii=False)}
+        - projects: {json.dumps(missing_fields['projects'], ensure_ascii=False)}
+        - interests: {json.dumps(missing_fields['interests'], ensure_ascii=False)}
+        - certifications: {json.dumps(missing_fields['certifications'], ensure_ascii=False)}
+
+        The candidate's existing skillset and background must remain the foundation. However, we want to:
+          1) **Reformulate** the summary to showcase how their existing expertise aligns with {career_title}.
+          2) **Merge** or expand the candidate's skills (hard skills) and social (soft skills) intelligently:
+             - Start with the candidate's existing or implied skills.
+             - Remove existing skills that have nothing to do with {career_title}.
+             - Add or rename relevant skills if strongly implied by the candidate’s background and beneficial for {career_title}.
+             - If the candidate used technology X that parallels {career_title}'s requirements, mention it by name.
+             - Do not invent entire new skill sets that have no basis in the candidate’s background, but if some skills can be derived from a concrete basis even if not explicitly mentioned, add them.
+          3) **Languages**: Suggest relevant languages (spoken or programming) helpful for {career_title}, staying realistic to what the candidate might have or could logically handle.
+          4) **Interests**: Expand or refine them only if they naturally complement {career_title}. Do not create random new interests without basis.
+          5) **Work, Projects, Certifications**:
+             - Reformulate or reorder existing responsibilities to highlight elements relevant to {career_title}.
+             - You may insert minor expansions if logically implied by the candidate's prior work (e.g., if they used Python for data scraping, you can mention Python-based automation if it’s relevant).
+             - Absolutely no outright fiction or creation of new roles, companies, or degrees.
+
+        **Constraints**:
+          - Everything must remain in {cv_language}.
+          - No adding extra fields beyond the specified structure.
+          - No false data or contradictory claims.
+
+        **Desired Output**:
+        Return a JSON with the exact structure below, with no additional commentary:
+
+        {{
+          "title": "{career_title}",
+          "name": "{name}",
+          "email": "{candidate.user.email}",
+          "phone": "{candidate.phone}",
+          "age": {missing_fields['age'] if missing_fields['age'] is not None else "null"},
+          "city": "{missing_fields['city'] or ''}",
+          "work": {json.dumps(missing_fields['work'], ensure_ascii=False)},
+          "educations": {json.dumps(missing_fields['educations'], ensure_ascii=False)},
+          "projects": {json.dumps(missing_fields['projects'], ensure_ascii=False)},
+          "interests": {json.dumps(missing_fields['interests'], ensure_ascii=False)},
+          "certifications": {json.dumps(missing_fields['certifications'], ensure_ascii=False)},
+          "languages": [
+            {{
+              "language": "<language_name>",
+              "level": "<proficiency>"
+            }}
+          ],
+          "skills": [
+            {{
+              "skill": "<hard_skill_name>",
+              "level": "<hard_skill_level>"
+            }}
+          ],
+          "social": [
+            {{
+              "skill": "<soft_skill_name>"
+            }}
+          ],
+          "headline": null,
+          "summary": "<tailored_summary>"
+        }}
+        
+        Don't forget reformulating work experiences, projects and certifications.
+        """
+    else:
+        # If no base CV data, produce a minimal prompt
+        prompt = f"""
+        The user has no base CV data but wants a tailored CV for career {career_title}.
+        Generate minimal placeholders in '{cv_language}' only, with realistic but minimal content.
+        Return only JSON with the same fields. Example:
+
+        {{
+          "title": "{career_title}",
+          "name": "{candidate.first_name} {candidate.last_name}",
+          "email": "{candidate.user.email}",
+          "phone": "{candidate.phone}",
+          "age": null,
+          "city": "",
+          "work": [],
+          "educations": [],
+          "projects": [],
+          "interests": [],
+          "certifications": [],
+          "languages": [
+            {{
+              "language": "<language_name>",
+              "level": "<proficiency>"
+            }}
+          ],
+          "skills": [
+            {{
+              "skill": "<hard_skill_name>",
+              "level": "<hard_skill_level>"
+            }}
+          ],
+          "social": [
+            {{
+              "skill": "<soft_skill_name>"
+            }}
+          ],
+          "headline": null,
+          "summary": "<tailored_summary>"
+        }}
+        """
+    return prompt
+
+
+def detect_cv_language(cv_data):
+    """
+    Attempts to detect the language of the candidate's CV,
+    by scanning the first non-empty 'responsibilities' in work experiences (if any).
+    Fallbacks to 'en' if detection fails.
+    """
+    if not cv_data.work:
+        return 'en'  # default if there's no work data
+
+    # Find first non-empty responsibilities to detect from
+    for experience in cv_data.work:
+        responsibilities = experience.get('responsibilities', '')
+        if responsibilities:
+            try:
+                return detect(responsibilities)
+            except LangDetectException:
+                pass
+
+    return 'en'

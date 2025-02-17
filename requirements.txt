@@ -111,3 +111,4 @@ django-storages
 boto3
 django-allauth
 dj-rest-auth
+langdetect

@@ -19,7 +19,8 @@ from django.db.models.signals import post_save
 from django.conf import settings
 import os
 from .utils import (get_gemini_response, deduct_credits, has_sufficient_credits, construct_only_score_job_prompt,
-                    construct_similarity_prompt, generate_cv_pdf, construct_career_guidance_prompt, robust_json_repair)
+                    construct_similarity_prompt, generate_cv_pdf, construct_career_guidance_prompt, robust_json_repair,
+                    construct_tailored_career_prompt, detect_cv_language)
 import json
 from .tasks import run_scraping_task
 from django.contrib.auth import authenticate
@@ -2056,6 +2057,105 @@ class ExistingJobCVView(APIView):
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
+class CareerCVView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_description="Tailor a CV based on an existing career ID.",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=['career_id'],
+            properties={
+                'career_id': openapi.Schema(type=openapi.TYPE_INTEGER, description='ID of the existing career'),
+            },
+        ),
+        responses={
+            200: CVDataSerializer(),
+            400: openapi.Response(description='Bad Request'),
+            403: openapi.Response(description='Insufficient credits.'),
+            404: openapi.Response(description='Career not found.'),
+            500: openapi.Response(description='Internal Server Error')
+        }
+    )
+    def post(self, request):
+        career_id = request.data.get('career_id')
+        if not career_id:
+            return Response({'error': 'Career ID is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            career = Career.objects.get(id=career_id)
+        except Career.DoesNotExist:
+            return Response({'error': 'Career not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        candidate = request.user.candidate
+        # Check credits
+        sufficient, credit_cost = has_sufficient_credits(candidate, 'tailor_cv_from_career')
+        if not sufficient:
+            return Response(
+                {'error': f'Insufficient credits. This action requires {credit_cost} credits.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Make sure the candidate has a base CV
+        base_cv = CV.objects.filter(candidate=candidate, cv_type=CV.BASE).first()
+        if not base_cv or not hasattr(base_cv, 'cv_data'):
+            return Response({'error': 'Base CV or associated data is missing.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        base_cv_data = base_cv.cv_data
+        base_cv_lang = detect_cv_language(base_cv_data)
+
+        # Pick the English translation if available, or fallback to first translation
+        en_translation = career.translations.filter(language__code="en").first()
+        if en_translation:
+            career_title = en_translation.title
+            career_transition = en_translation.transition_path
+        else:
+            fallback_translation = career.translations.first()
+            if fallback_translation:
+                career_title = fallback_translation.title
+                career_transition = fallback_translation.transition_path
+            else:
+                career_title = career.group_identifier
+                career_transition = "No transition path available."
+
+        # Check if a tailored CV for this career already exists
+        tailored_cv, created = CV.objects.get_or_create(
+            candidate=candidate,
+            cv_type=CV.TAILORED,
+            career=career,
+            defaults={"job": None},  # ensure job is not set
+        )
+        # fetch or create associated CVData
+        tailored_cv_data, _ = CVData.objects.get_or_create(cv=tailored_cv)
+
+        # Construct the prompt & get AI data
+        prompt = construct_tailored_career_prompt(
+            cv_data_instance=base_cv.cv_data,
+            candidate=candidate,
+            career_title=career_title,
+            career_transition=career_transition,
+            cv_language=base_cv_lang,
+        )
+        try:
+            gemini_response = get_gemini_response(prompt)
+            gemini_response = (gemini_response.split("```json")[-1]).split("```")[0]
+            tailored_data = json.loads(gemini_response)
+        except Exception as e:
+            return Response({'error': f"Failed to fetch tailored CV data from Gemini: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        # Update the tailored CVData
+        serializer = CVDataSerializer(tailored_cv_data, data=tailored_data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            # Deduct the credit
+            deduct_credits(candidate, 'tailor_cv_from_career')
+
+            # Return the entire CV (with the new tailored data)
+            return Response(CVSerializer(tailored_cv, context={'request': request}).data, status=status.HTTP_200_OK)
+        else:
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
 class JobDescriptionCVView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -3993,7 +4093,7 @@ class ResponsesView(APIView):
                 if "selected_option" in response_data:
                     opt_id = response_data["selected_option"]
                     selected_option_obj = answer_options.get(opt_id)
-                    if not selected_option_obj:
+                    if not selected_option_obj and opt_id is not None:
                         errors.append({
                             "question_id": question.id,
                             "selected_option_id": opt_id,
@@ -4008,7 +4108,7 @@ class ResponsesView(APIView):
                     selected_option_objs = []
                     for opt_id in selected_options_ids:
                         option_obj = answer_options.get(opt_id)
-                        if not option_obj:
+                        if not option_obj and opt_id is not None:
                             errors.append({
                                 "question_id": question.id,
                                 "selected_option_id": opt_id,
@@ -4087,18 +4187,55 @@ class ResponsesView(APIView):
             }, status=status.HTTP_200_OK)
 
         # Fetch newly saved responses efficiently
-        stepper_responses = CandidateResponse.objects.filter(candidate=candidate).values(
+        stepper_responses = CandidateResponse.objects.filter(candidate=candidate).exclude(
+            Q(text_answer__isnull=True) & Q(selected_option__text__isnull=True) & Q(selected_options__text__isnull=True)
+        ).values(
             "question__text", "text_answer", "selected_option__text", "selected_options__text"
         )
+
+        answers_by_question = {}
+        for row in stepper_responses:
+            q_text = row["question__text"]
+            # Collect non-empty answers in a temporary list
+            partial_answers = []
+
+            if row["text_answer"]:
+                partial_answers.append(row["text_answer"])
+
+            if row["selected_option__text"]:
+                partial_answers.append(row["selected_option__text"])
+
+            if row["selected_options__text"]:
+                # If your DB returns each selected checkbox as a separate row,
+                #   row["selected_options__text"] is probably just a single string.
+                # If it sometimes returns a comma-separated string, you can parse further as needed.
+                partial_answers.append(row["selected_options__text"])
+
+            if q_text in answers_by_question:
+                answers_by_question[q_text].extend(partial_answers)
+            else:
+                answers_by_question[q_text] = partial_answers
+
+        final_stepper_responses = []
+        for q_text, answers_list in answers_by_question.items():
+            # Join them with commas or semicolons—your choice
+            answer_text = ", ".join(answers_list)
+            final_stepper_responses.append({
+                "question_text": q_text,
+                "answer_text": answer_text
+            })
 
         # Fetch available languages efficiently
         available_languages = {lang.code: lang.name for lang in Language.objects.all()}
 
         candidate_profile = construct_candidate_profile(cv_data)
 
-        # Construct AI prompt for career recommendations
-        prompt = construct_career_guidance_prompt(candidate_profile, list(stepper_responses), available_languages)
+        config = GeneralSetting.objects.get_configuration()
+        num_of_careers_to_generate = config.num_of_careers_to_generate
 
+        # Construct AI prompt for career recommendations
+        prompt = construct_career_guidance_prompt(candidate_profile, final_stepper_responses, available_languages, num_of_careers_to_generate)
+        print(prompt)
         try:
             gemini_response = get_gemini_response(prompt)
             gemini_response = (gemini_response.split("```json")[-1]).split("```")[0]
@@ -4113,8 +4250,7 @@ class ResponsesView(APIView):
 
         # Store career recommendations efficiently
         created_careers = []
-        print(career_data)
-        for career_info in career_data:
+        for career_info in career_data[:num_of_careers_to_generate]:
             # Ensure unique group_identifier by slugifying + adding a random suffix
             slug = slugify(career_info["career_title"])
             random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
@@ -4213,6 +4349,7 @@ class CandidateCareersView(APIView):
 
             if career_translation:
                 career_data.append({
+                    "id": candidate_career.id,
                     "career_title": career_translation.title,
                     "transition_path": career_translation.transition_path
                 })

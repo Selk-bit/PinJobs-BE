@@ -7,7 +7,7 @@ from .views import (
     UserProfileView, PackPricesView, AbstractTemplateListView, CVDetailView, DownloadCVPDFView, JobDetailView,
     RecentSearchTermsView, PasswordResetRequestView, PasswordResetConfirmView, VerifyEmailView, custom_google_callback,
     JobLocationsView, AdsByTypeView, GenerateJobCVScoreView, QuestionsView, QuestionTranslationsView, ResponsesView,
-    get_answer_options, CandidateCareersView
+    get_answer_options, CandidateCareersView, CareerCVView
 )
 from django.contrib.auth import views as auth_views
 from django.contrib import admin
@@ -40,6 +40,7 @@ urlpatterns = [
     path('cvs/tailored/job-description/', JobDescriptionCVView.as_view(), name='job_description_cv'),
     path('cvs/tailored/job-link/', JobLinkCVView.as_view(), name='job_link_cv'),
     path('cvs/tailored/existing-job/', ExistingJobCVView.as_view(), name='existing_job_cv'),
+    path('cvs/tailored/career/', CareerCVView.as_view(), name='existing_career_cv'),
     path('cvs/tailored/<int:id>/template/', TemplateDetailView.as_view(), name='template-detail'),
     path('cvs/<int:id>/', CVDetailView.as_view(), name='cv_detail'),
     path('cvs/<int:id>/download/', DownloadCVPDFView.as_view(), name='download_cv_pdf'),

@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from .models import (Candidate, CV, CVData, Job, JobSearch, Payment, CreditPurchase, Template, Location, Keyword,
-                     Price, Pack, AbstractTemplate, Favorite, Ad, Question, AnswerOption, CandidateResponse)
+                     Price, Pack, AbstractTemplate, Favorite, Ad, Question, AnswerOption, CandidateResponse,
+                     CareerTranslation, Career)
 from django.contrib.auth.models import User
 from rest_framework.response import Response
 
@@ -161,8 +162,23 @@ class AdSerializer(serializers.ModelSerializer):
         return True
 
 
+class CareerTranslationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CareerTranslation
+        fields = ["language", "title", "transition_path"]
+
+
+class CareerSerializer(serializers.ModelSerializer):
+    translations = CareerTranslationSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Career
+        fields = ["id", "group_identifier", "translations"]
+
+
 class CVSerializer(serializers.ModelSerializer):
     job = JobSerializer()
+    career = CareerSerializer()
     cv_data = CVDataSerializer()
     thumbnail = serializers.ImageField(read_only=True)
     template = serializers.SerializerMethodField()
@@ -170,7 +186,7 @@ class CVSerializer(serializers.ModelSerializer):
     class Meta:
         model = CV
         fields = ['id', 'uid', 'name', 'original_file', 'cv_type', 'generated_pdf',
-                  'thumbnail', 'cv_data', 'job', 'template', 'created_at', 'updated_at']
+                  'thumbnail', 'cv_data', 'job', 'career', 'template', 'created_at', 'updated_at']
 
     def get_template(self, obj):
         # Serialize the associated template, if it exists
@@ -301,13 +317,13 @@ class CandidateResponseSerializer(serializers.ModelSerializer):
         """ Ensure that response type matches the question type. """
         question = self.context["question"]
 
-        if question.question_type == Question.TEXT and not data.get("text_answer"):
-            raise serializers.ValidationError({"text_answer": "This question requires a text response."})
-
-        if question.question_type == Question.RADIO and not data.get("selected_option"):
-            raise serializers.ValidationError({"selected_option": "This question requires a single selected option."})
-
-        if question.question_type == Question.CHECKBOX and not data.get("selected_options"):
-            raise serializers.ValidationError({"selected_options": "This question requires multiple selected options."})
+        # if question.question_type == Question.TEXT and not data.get("text_answer"):
+        #     raise serializers.ValidationError({"text_answer": "This question requires a text response."})
+        #
+        # if question.question_type == Question.RADIO and not data.get("selected_option"):
+        #     raise serializers.ValidationError({"selected_option": "This question requires a single selected option."})
+        #
+        # if question.question_type == Question.CHECKBOX and not data.get("selected_options"):
+        #     raise serializers.ValidationError({"selected_options": "This question requires multiple selected options."})
 
         return data
