@@ -119,6 +119,7 @@ class CV(models.Model):
     name = models.CharField(max_length=255, blank=True, null=True)
     cv_type = models.CharField(max_length=10, choices=CV_TYPE_CHOICES, default=BASE)
     job = models.ForeignKey('Job', on_delete=models.CASCADE, null=True, blank=True, related_name='tailored_cvs')
+    career = models.ForeignKey('Career', on_delete=models.CASCADE, null=True, blank=True, related_name='tailored_cvs')
     thumbnail = models.ImageField(upload_to='Cvs/thumbnails/', blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -366,6 +367,7 @@ class GeneralSettingManager(models.Manager):
 class GeneralSetting(models.Model):
     ads_per_page = models.PositiveIntegerField(default=2, help_text="Number of ads to display per page.")
     max_recent_search_terms = models.PositiveIntegerField(default=10, help_text="Number of search suggestions to display.")
+    credits_to_start_with = models.PositiveIntegerField(default=10, help_text="Number of credits to start with")
     num_of_careers_to_generate = models.PositiveIntegerField(default=5, help_text="Number of careers to generate")
     last_updated = models.DateTimeField(auto_now=True)
 
