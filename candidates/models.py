@@ -119,7 +119,6 @@ class CV(models.Model):
     name = models.CharField(max_length=255, blank=True, null=True)
     cv_type = models.CharField(max_length=10, choices=CV_TYPE_CHOICES, default=BASE)
     job = models.ForeignKey('Job', on_delete=models.CASCADE, null=True, blank=True, related_name='tailored_cvs')
-    career = models.ForeignKey('Career', on_delete=models.CASCADE, null=True, blank=True, related_name='tailored_cvs')
     thumbnail = models.ImageField(upload_to='Cvs/thumbnails/', blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
