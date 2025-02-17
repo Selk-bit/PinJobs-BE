@@ -4235,7 +4235,6 @@ class ResponsesView(APIView):
 
         # Construct AI prompt for career recommendations
         prompt = construct_career_guidance_prompt(candidate_profile, final_stepper_responses, available_languages, num_of_careers_to_generate)
-        print(prompt)
         try:
             gemini_response = get_gemini_response(prompt)
             gemini_response = (gemini_response.split("```json")[-1]).split("```")[0]
