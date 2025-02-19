@@ -72,8 +72,8 @@ DEFAULT_TEMPLATE_DATA = {
         'underlineLinks': False,
     },
 }
-FRONTEND_PREVIEW_URL = "https://pinjobs-frontend.onrender.com/resume-preview/"
-FRONTEND_BASE_URL = "https://pinjobs-frontend.onrender.com"
+FRONTEND_PREVIEW_URL = "https://pinjobs-fe.onrender.com/resume-preview/"
+FRONTEND_BASE_URL = "https://pinjobs-fe.onrender.com"
 
 WELCOME_QUESTION = {
     "question_type": "welcome",

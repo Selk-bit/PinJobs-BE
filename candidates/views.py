@@ -20,7 +20,7 @@ from django.conf import settings
 import os
 from .utils import (get_gemini_response, deduct_credits, has_sufficient_credits, construct_only_score_job_prompt,
                     construct_similarity_prompt, generate_cv_pdf, construct_career_guidance_prompt, robust_json_repair,
-                    construct_tailored_career_prompt, detect_cv_language)
+                    construct_tailored_career_prompt, detect_cv_language, get_gemini_json_response)
 import json
 from .tasks import run_scraping_task
 from django.contrib.auth import authenticate
@@ -1905,6 +1905,7 @@ class JobLinkCVView(APIView):
 
         # Create the JobSearch with the similarity score
         JobSearch.objects.get_or_create(
+            cv=base_cv,
             cv__candidate=candidate,
             job=job,
             defaults={"similarity_score": score}
@@ -1915,6 +1916,13 @@ class JobLinkCVView(APIView):
                 'error': 'The job does not align well with your profile. Proceeding to tailor a resume is not recommended.',
                 'job_score_data': job_score_data
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        if score >= 80:
+            return Response({
+                'message': f'This job already aligns well with your profile. The similarity score percentage between this job and your profile according to our estimate is {score}% According to our estimation. Proceeding to tailor a resume is not recommended.',
+                'score': score
+            }, status=status.HTTP_200_OK)
+
 
         # Check if a tailored CV for this job already exists
         tailored_cv, created = CV.objects.get_or_create(
@@ -2020,9 +2028,15 @@ class ExistingJobCVView(APIView):
             JobSearch.objects.create(cv=base_cv, job=job, similarity_score=score)
 
         # If the score is less than 50, return a "not recommended" response
-        if score < 50:
+        # if score < 50:
+        #     return Response({
+        #         'message': f'The job does not align well with your profile. The similarity score percentage between this job and your profile according to our estimate is {score}% According to our estimation. Proceeding to tailor a resume is not recommended.',
+        #         'score': score
+        #     }, status=status.HTTP_200_OK)
+
+        if score >= 80:
             return Response({
-                'message': f'The job does not align well with your profile. The similarity score percentage between this job and your profile according to our estimate is {score}% According to our estimation. Proceeding to tailor a resume is not recommended.',
+                'message': f'This job already aligns well with your profile. The similarity score percentage between this job and your profile according to our estimate is {score}% According to our estimation. Proceeding to tailor a resume is not recommended.',
                 'score': score
             }, status=status.HTTP_200_OK)
 
@@ -2035,13 +2049,12 @@ class ExistingJobCVView(APIView):
 
         # Ensure CVData for the tailored CV
         tailored_cv_data, _ = CVData.objects.get_or_create(cv=tailored_cv)
-
         # Construct the tailored CV prompt
         tailored_prompt = construct_tailored_job_prompt(base_cv_data, candidate, job.description)
 
         # Get tailored CV data from Gemini
         try:
-            tailored_response = get_gemini_response(tailored_prompt)
+            tailored_response = get_gemini_json_response(tailored_prompt)
             tailored_response = (tailored_response.split("```json")[-1]).split("```")[0]
             tailored_data = json.loads(tailored_response)
         except Exception as e:

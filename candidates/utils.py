@@ -14,7 +14,6 @@ from .constants import *
 from .models import Job, JobSearch, CVData, CreditAction, CV
 from django.core.files.storage import default_storage
 from paypalcheckoutsdk.core import PayPalHttpClient, SandboxEnvironment
-from bs4 import BeautifulSoup
 import re
 import asyncio
 import aiohttp
@@ -133,8 +132,15 @@ def get_proxies():
 
 def get_gemini_response(prompt):
     genai.configure(api_key=settings.GEMINI_API_KEY)
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    model = genai.GenerativeModel('gemini-2.0-flash', generation_config=genai.GenerationConfig(temperature=0.0))
     response = model.generate_content(prompt)
+    return response.text
+
+
+def get_gemini_json_response(prompt):
+    genai.configure(api_key=settings.GEMINI_API_KEY)
+    model = genai.GenerativeModel('gemini-2.0-flash', generation_config=genai.GenerationConfig(temperature=0.0))
+    response = model.generate_content(prompt, generation_config={"response_mime_type": "application/json"})
     return response.text
 
 
@@ -205,7 +211,7 @@ def extract_job_id(job_url):
     """
     Extracts the job ID from a LinkedIn job URL.
     """
-    match = re.search(r'-(\d+)\?|/jobs/view/(\d+)', job_url)
+    match = re.search(r'-(\d+)(?:\?|$)|/jobs/view/(\d+)', job_url)
     if match:
         return match.group(1) or match.group(2)
     return None
@@ -213,6 +219,8 @@ def extract_job_id(job_url):
 
 def construct_job_detail_url(url):
     job_id = extract_job_id(url)
+    if not job_id:
+        return None
     return f"https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{job_id}"
 
 
@@ -822,77 +830,93 @@ def fetch_job_description(url, max_retries=100):
     return None
 
 
+def strip_html_tags(html_text):
+    """
+x    Removes all HTML tags from the given text.
+    """
+    soup = BeautifulSoup(html_text, "html.parser")
+    return soup.get_text(separator="\n").strip()
+
+
 def construct_tailored_job_prompt(cv_data_instance, candidate, job_description):
     if cv_data_instance:
+        stripped_job_description = strip_html_tags(job_description)
+        job_description_lang = detect(stripped_job_description)
+        job_description_lang = job_description_lang if job_description_lang else "en"
+
         # Use the name from the existing CVData if available
         name = cv_data_instance.name if cv_data_instance.name else f"{candidate.first_name} {candidate.last_name}"
         # Determine which fields are missing
         missing_fields = {
+            "email": cv_data_instance.email,
+            "phone": cv_data_instance.phone,
             "age": cv_data_instance.age,
             "work": cv_data_instance.work,
             "educations": cv_data_instance.educations,
             "projects": cv_data_instance.projects,
             "interests": cv_data_instance.interests,
             "certifications": cv_data_instance.certifications,
+            "skills": cv_data_instance.skills,
+            "social": cv_data_instance.social
         }
 
         # Construct the prompt to ask for missing fields only
         prompt = f"""
-            You are tasked with generating a JSON representation of a resume based on a job description.
-            The resume should intelligently match the job requirements, but you should not copy the job description verbatim.
-            Instead, create a resume that fits the job's requirements by tailoring certain fields appropriately.
+You are tasked with generating a JSON representation of a resume based on a job description.
+The resume should intelligently match the job requirements, but you should not copy the job description verbatim.
+Instead, create a resume that fits the job's requirements by tailoring certain fields appropriately.
 
-            Follow the instructions indicated below for each field :
+Follow the instructions indicated below for each field :
 
-            **Skills**: Include a list of relevant hard skills based on the job description, replacing the original skills in the profile with the ones mentioned in the job description intelligently in a way that aligns with the candidate's experience and education. Hard skills emphasized in the job description should have an advanced level, while others can have an intermediate level to retain a realistic skill set, and ALL skills should be written in the language of the job description.
-            **Social**: Include a list of relevant soft skills based on the job description, written in the language of the job description.
-            **Languages**: Include any languages that could be relevant for the job, written in the language of the job description.
-            **Summary**: Write a brief summary that showcases the candidate as a good fit for the role without making any false claims, nor mentioning the company name. Write the summary in the language of the job description.
-            **Age**: Leave age value as I passed it without any change.
-            **Work**: If the language of the job description matched the language of work experiences I passed (assuming that I passed it non-empty, otherwise leave it empty), reformulate work experiences with putting an emphasis on areas that corresponds with the job, without adding or removing anything, just reformulating. And if the job description was in a different language, translate work experiences text to that language.
-            **Educations**: If the language of the job description matched the language of educations I passed (assuming that I passed it non-empty, otherwise leave it empty), leave educations text as I passed it, and if it didn't match the language, translate educations to the language of the job description.
-            **Projects**: If the language of the job description matched the language of projects I passed (assuming that I passed it non-empty, otherwise leave it empty), leave projects text as I passed it, and if it didn't match the language, translate projects to the language of the job description.
-            **Certifications**: If the language of the job description matched the language of certifications I passed (assuming that I passed it non-empty, otherwise leave it empty), leave certifications text as I passed it, and if it didn't match the language, translate certifications to the language of the job description.
-            **Interests**: If the language of the job description matched the language of interests I passed (assuming that I passed it non-empty, otherwise leave it empty), leave interests text as I passed it, and if it didn't match the language, translate interests to the language of the job description.
+**Name**: Leave name value as I passed it without any change.
+**Email**: Leave email value as I passed it without any change.
+**Phone**: Leave phone value as I passed it without any change.
+**Age**: Leave age value as I passed it without any change.
+**Work**: If the language of work experiences I passed is {job_description_lang} (assuming that I passed it non-empty, otherwise leave it empty), reformulate work experiences with putting an emphasis on areas that corresponds with the job, without adding or removing anything, just reformulating. And if the job description was in a different language, translate work experiences text to {job_description_lang}.
+**Educations**: If the language of education text I passed is {job_description_lang} (assuming that I passed it non-empty, otherwise leave it empty), leave educations text as I passed it, otherwise, translate degree titles to {job_description_lang}.
+**Projects**: If the language of projects I passed is {job_description_lang} (assuming that I passed it non-empty, otherwise leave it empty), leave projects text as I passed it, otherwise, translate projects to {job_description_lang}.
+**Certifications**: If the language of certifications I passed is {job_description_lang} (assuming that I passed it non-empty, otherwise leave it empty), leave certifications text as I passed it, otherwise, translate certifications to {job_description_lang}.
+**Interests**: If the language of interests I passed is {job_description_lang} (assuming that I passed it non-empty, otherwise leave it empty), leave interests text as I passed it, otherwise, translate interests to {job_description_lang}.
+**Skills**: Include a list of relevant hard skills based on the job description, as well as reformulating the original skills in the candidate's profile intelligently in a way that aligns with the job, removing skills that are far away from the job requirements. To retain a realistic skill set, decide the level of each hard skill by choosing between "beginner", "intermediate" and "advanced", based on intelligently analyzing job responsibilities tasks and the candidate's years of experience, as well as keeping skill levels that are already set by the candidate. All skills, as well as their levels and categories, should be written in {job_description_lang}.
+**Social**: Include a list of relevant soft skills based on the job description, as well as reformulating the original soft skills in the candidate's profile intelligently in a way that aligns with the job, written in {job_description_lang}.
+**Languages**: Include any languages that could be relevant to the job, written in {job_description_lang}.
+**Summary**: Write a brief summary that showcases the candidate as a good fit for the role without making any false claims, nor mentioning the company name. Write the summary in {job_description_lang}.
 
-            If a city or country is found in the job description, use it as the candidate's location.
+If a city or country is found in the job description, use it as the candidate's location.
 
-            Return the data as a JSON with the following structure:
-            {{
-                "title": "<job_title>",
-                "name": "{name}",
-                "email": "{candidate.user.email}",
-                "phone": "{candidate.phone}",
-                "age": {missing_fields['age']},
-                "city": "<city>",
-                "work": {missing_fields['work']},
-                "educations": {missing_fields['educations']},
-                "projects": {missing_fields['projects']},
-                "interests": {missing_fields['interests']},
-                "certifications": {missing_fields['certifications']},
-                "languages": [
-                    {{
-                        "language": "<language_name>",
-                        "level": "<proficiency>"
-                    }}
-                ],
-                "skills": [
-                    {{
-                        "skill": "<hard_skill_name>",
-                        "level": "<hard_skill_level>"
-                    }}
-                ],
-                "social": [
-                    {{
-                        "skill": "<soft_skill_name>"
-                    }}
-                ],
-                "headline": null,
-                "summary": "<tailored_summary>"
-            }}
+Return the data as a JSON with the following structure:
+{{
+    "title": "<job_title>",
+    "name": "{name}",
+    "email": "{missing_fields['email']}",
+    "phone": "{missing_fields['phone']}",
+    "age": {missing_fields['age']},
+    "city": "<city>",
+    "work": {missing_fields['work']},
+    "educations": {missing_fields['educations']},
+    "projects": {missing_fields['projects']},
+    "interests": {missing_fields['interests']},
+    "certifications": {missing_fields['certifications']},
+    "languages": [
+        {{
+            "language": "<language_name>",
+            "level": "<proficiency>"
+        }}
+    ],
+    "skills": {missing_fields['skills']},
+    "social": {missing_fields['social']},
+    "headline": null,
+    "summary": "<tailored_summary>"
+}}
 
-            Here is the job description:
-            {job_description}
+In this JSON example, I have passed the original candidate's resume data for "work", "educations", "projects", "interests", "certifications", "skills" and "social". for each one, abide by its corresponding instructions defined above.
+
+Here is the job description:
+====================JOB DESCRIPTION======================
+{stripped_job_description}
+====================JOB DESCRIPTION======================
+
+Please don't forget that all data should be in the same language as the job description, thus translate all values if they were in a different language, even work experiences responsibilities, and make sure to not use double quotes inside any value, replace them with signle quotes instead.
         """
     else:
         # Construct the full prompt if no CVData exists
@@ -930,7 +954,8 @@ def construct_tailored_job_prompt(cv_data_instance, candidate, job_description):
                 "skills": [
                     {{
                         "skill": "<hard_skill_name>",
-                        "level": "<hard_skill_level>"
+                        "level": "<hard_skill_level>",
+                        "category": "<hard_skill_category>"
                     }}
                 ],
                 "social": [
@@ -1625,7 +1650,8 @@ def construct_tailored_career_prompt(cv_data_instance, candidate, career_title, 
           "skills": [
             {{
               "skill": "<hard_skill_name>",
-              "level": "<hard_skill_level>"
+              "level": "<hard_skill_level>",
+              "category": "<hard_skill_category>"
             }}
           ],
           "social": [
@@ -1667,7 +1693,8 @@ def construct_tailored_career_prompt(cv_data_instance, candidate, career_title, 
           "skills": [
             {{
               "skill": "<hard_skill_name>",
-              "level": "<hard_skill_level>"
+              "level": "<hard_skill_level>",
+              "category": "<hard_skill_category>"
             }}
           ],
           "social": [
