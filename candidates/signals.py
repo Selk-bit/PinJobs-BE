@@ -132,8 +132,8 @@ def handle_cv_update(sender, instance, **kwargs):
             cv = None
 
     # Generate PDF if both cv_data and template exist
-    # if cv and cv.cv_data and cv.cv_data.name and cv.template:
-    #     generate_cv_pdf(cv)
+    if cv and cv.cv_data and cv.cv_data.name and cv.template:
+        generate_cv_pdf(cv)
 
 
 @receiver(post_save, sender=User)
