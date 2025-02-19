@@ -2028,11 +2028,11 @@ class ExistingJobCVView(APIView):
             JobSearch.objects.create(cv=base_cv, job=job, similarity_score=score)
 
         # If the score is less than 50, return a "not recommended" response
-        # if score < 50:
-        #     return Response({
-        #         'message': f'The job does not align well with your profile. The similarity score percentage between this job and your profile according to our estimate is {score}% According to our estimation. Proceeding to tailor a resume is not recommended.',
-        #         'score': score
-        #     }, status=status.HTTP_200_OK)
+        if score < 50:
+            return Response({
+                'message': f'The job does not align well with your profile. The similarity score percentage between this job and your profile according to our estimate is {score}% According to our estimation. Proceeding to tailor a resume is not recommended.',
+                'score': score
+            }, status=status.HTTP_200_OK)
 
         if score >= 80:
             return Response({
