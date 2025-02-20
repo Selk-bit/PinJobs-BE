@@ -38,7 +38,6 @@ class CandidateSerializer(serializers.ModelSerializer):
 class TemplateSerializer(serializers.ModelSerializer):
     name = serializers.CharField(source="abstract_template.name", read_only=True)
     reference = serializers.CharField(source="abstract_template.reference", read_only=True)
-    language = serializers.CharField(source="abstract_template.language", read_only=True)
     templateData = serializers.SerializerMethodField()
 
     class Meta:
