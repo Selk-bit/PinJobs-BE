@@ -338,7 +338,7 @@ class JobDetailView(APIView):
             job = Job.objects.get(id=id)
             job_ids = [job.id]
 
-            job_searches = JobSearch.objects.filter(job_id__in=job_ids)
+            job_searches = JobSearch.objects.filter(job_id__in=job_ids, cv__candidate=request.user.candidate)
             similarity_scores_map = {}
             for js in job_searches:
                 job_id = js.job_id
