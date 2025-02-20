@@ -4,6 +4,7 @@ from .models import (Candidate, CV, CVData, Job, JobSearch, Payment, CreditPurch
                      CareerTranslation, Career)
 from django.contrib.auth.models import User
 from rest_framework.response import Response
+from langdetect import detect, LangDetectException
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -182,16 +183,30 @@ class CVSerializer(serializers.ModelSerializer):
     cv_data = CVDataSerializer()
     thumbnail = serializers.ImageField(read_only=True)
     template = serializers.SerializerMethodField()
+    lang = serializers.SerializerMethodField()
 
     class Meta:
         model = CV
         fields = ['id', 'uid', 'name', 'original_file', 'cv_type', 'generated_pdf',
-                  'thumbnail', 'cv_data', 'job', 'career', 'template', 'created_at', 'updated_at']
+                  'thumbnail', 'cv_data', 'job', 'career', 'template', 'lang', 'created_at', 'updated_at']
 
     def get_template(self, obj):
         # Serialize the associated template, if it exists
         if obj.template:
             return TemplateSerializer(obj.template).data
+        return None
+
+    def get_lang(self, obj):
+        if obj.cv_data:
+            languages = []
+            for experience in obj.cv_data.work:
+                responsibilities = experience.get('responsibilities', '')
+                if responsibilities:
+                    try:
+                        languages.append(detect(responsibilities))
+                    except LangDetectException:
+                        pass
+            return max(set(languages), key=languages.count) if languages else None
         return None
 
 
