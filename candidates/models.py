@@ -17,7 +17,7 @@ class Candidate(models.Model):
     age = models.IntegerField(blank=True, null=True)
     city = models.CharField(max_length=100, blank=True, null=True)
     country = models.CharField(max_length=100, blank=True, null=True)
-    credits = models.IntegerField(default=0)
+    credits = models.FloatField(default=0)
     profile_picture = models.ImageField(upload_to="profile_pictures/", blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -123,6 +123,10 @@ class CV(models.Model):
     thumbnail = models.ImageField(upload_to='Cvs/thumbnails/', blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        managed = False
+        db_table = "candidates_cv"
 
     def __str__(self):
         return f"{self.get_cv_type_display()} for {self.candidate.first_name} {self.candidate.last_name}"
@@ -373,6 +377,10 @@ class GeneralSetting(models.Model):
 
     objects = GeneralSettingManager()
 
+    class Meta:
+        managed = False
+        db_table = "candidates_generalsetting"
+
     def __str__(self):
         return "General Settings"
 
@@ -420,7 +428,7 @@ class Price(models.Model):
 
 class CreditAction(models.Model):
     action_name = models.CharField(max_length=100, unique=True)
-    credit_cost = models.PositiveIntegerField(default=1)
+    credit_cost = models.FloatField(default=1)
 
     def __str__(self):
         return f"{self.action_name} - {self.credit_cost} credits"

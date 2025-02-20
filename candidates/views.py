@@ -1850,7 +1850,7 @@ class JobLinkCVView(APIView):
 
         # Check candidate credits
         candidate = request.user.candidate
-        sufficient, credit_cost = has_sufficient_credits(candidate, 'tailor_job_from_link')
+        sufficient, credit_cost = has_sufficient_credits(candidate, 'tailor_cv_from_job_link')
         if not sufficient:
             return Response(
                 {'error': f'Insufficient credits. This action requires {credit_cost} credits.'},
@@ -1949,7 +1949,7 @@ class JobLinkCVView(APIView):
         serializer = CVDataSerializer(tailored_cv_data, data=tailored_data, partial=True)
         if serializer.is_valid():
             serializer.save()
-            deduct_credits(candidate, 'tailor_job_from_link')
+            deduct_credits(candidate, 'tailor_cv_from_job_link')
             return Response(CVSerializer(tailored_cv, context={'request': request}).data, status=status.HTTP_200_OK)
         else:
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -1987,7 +1987,7 @@ class ExistingJobCVView(APIView):
             return Response({'error': 'Job not found.'}, status=status.HTTP_404_NOT_FOUND)
 
         candidate = request.user.candidate
-        sufficient, credit_cost = has_sufficient_credits(candidate, 'tailor_job_from_existing')
+        sufficient, credit_cost = has_sufficient_credits(candidate, 'tailor_cv_from_existing_job')
         if not sufficient:
             return Response(
                 {'error': f'Insufficient credits. This action requires {credit_cost} credits.'},
@@ -2064,7 +2064,7 @@ class ExistingJobCVView(APIView):
         serializer = CVDataSerializer(tailored_cv_data, data=tailored_data, partial=True)
         if serializer.is_valid():
             serializer.save()
-            deduct_credits(candidate, 'tailor_job_from_existing')
+            deduct_credits(candidate, 'tailor_cv_from_existing_job')
             return Response(CVSerializer(tailored_cv, context={'request': request}).data, status=status.HTTP_200_OK)
         else:
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -2198,7 +2198,7 @@ class JobDescriptionCVView(APIView):
 
         # Check if the candidate has enough credits
         candidate = request.user.candidate
-        sufficient, credit_cost = has_sufficient_credits(candidate, 'tailor_job_from_description')
+        sufficient, credit_cost = has_sufficient_credits(candidate, 'tailor_cv_from_description')
         if not sufficient:
             return Response(
                 {'error': f'Insufficient credits. This action requires {credit_cost} credits.'},
@@ -2229,7 +2229,7 @@ class JobDescriptionCVView(APIView):
 
         if serializer.is_valid():
             serializer.save()
-            deduct_credits(candidate, 'tailor_job_from_description')
+            deduct_credits(candidate, 'tailor_cv_from_description')
             serialized_data = serializer.data
             serialized_data.pop('id', None)
             serialized_data.pop('cv', None)
@@ -3189,6 +3189,14 @@ class GenerateJobCVScoreView(APIView):
         job_id = request.data.get("job_id")
         cv_id = request.data.get("cv_id")
 
+        candidate = request.user.candidate
+        sufficient, credit_cost = has_sufficient_credits(candidate, 'calculate_similarity_score')
+        if not sufficient:
+            return Response(
+                {'error': f'Insufficient credits. This action requires {credit_cost} credits.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
         if not job_id or not cv_id:
             return Response(
                 {"error": "Both job_id and cv_id are required."},
@@ -3210,8 +3218,13 @@ class GenerateJobCVScoreView(APIView):
         job_search = JobSearch.objects.filter(cv=cv, job=job).first()
         if job_search and job_search.last_scored_at and job_search.last_scored_at >= cv.cv_data.updated_at:
             return Response(
-                {"detail": "The score is already up-to-date.", "job_id": job_id, "cv_id": cv_id,
-                 "score": job_search.similarity_score},
+                {
+                    "detail": "The score is already up-to-date.",
+                    "job_id": job_id,
+                    "cv_id": cv_id,
+                    "score": job_search.similarity_score,
+                    "credits": candidate.credits
+                },
                 status=status.HTTP_200_OK
             )
 
@@ -3238,11 +3251,12 @@ class GenerateJobCVScoreView(APIView):
                 cv=cv,
                 defaults={"similarity_score": score, "last_scored_at": datetime.now()}
             )
-
+            deduct_credits(candidate, 'calculate_similarity_score')
             return Response(
                 {
                     "detail": "Similarity score generated successfully.",
-                    "score": score
+                    "score": score,
+                    "credits": candidate.credits
                 },
                 status=status.HTTP_200_OK
             )
