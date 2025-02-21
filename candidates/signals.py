@@ -133,6 +133,7 @@ def handle_cv_update(sender, instance, **kwargs):
 
     if cv and cv.cv_data and cv.cv_data.name and cv.template:
         cv_lang = detect_cv_language(instance)
+        print(cv_lang)
         language_choices = Template._meta.get_field('language').choices
         language_values = [choice[0] for choice in language_choices]
         template_lang = cv_lang if cv_lang in language_values else None
