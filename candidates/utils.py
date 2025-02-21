@@ -1716,15 +1716,16 @@ def detect_cv_language(cv_data):
     Fallbacks to 'en' if detection fails.
     """
     if not cv_data.work:
-        return 'en'  # default if there's no work data
+        return None
 
+    languages = []
     # Find first non-empty responsibilities to detect from
     for experience in cv_data.work:
         responsibilities = experience.get('responsibilities', '')
         if responsibilities:
             try:
-                return detect(responsibilities)
+                languages.append(detect(responsibilities))
             except LangDetectException:
                 pass
 
-    return 'en'
+    return max(set(languages), key=languages.count) if languages else None

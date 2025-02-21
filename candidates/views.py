@@ -298,7 +298,7 @@ class CandidateJobsView(APIView):
             similarity_scores_map[job_id].append({
                 'cv_id': js.cv.id,
                 'type': js.cv.cv_type,
-                'score': js.similarity_score
+                'score': int(js.similarity_score)
             })
 
         applies_map = {js.job_id: js.is_applied for js in job_searches}
@@ -347,7 +347,7 @@ class JobDetailView(APIView):
                 similarity_scores_map[job_id].append({
                     'cv_id': js.cv.id,
                     'type': js.cv.cv_type,
-                    'score': js.similarity_score
+                    'score': int(js.similarity_score)
                 })
 
             applies_map = {js.job_id: js.is_applied for js in job_searches}
@@ -457,7 +457,7 @@ class CandidateFavoriteJobsView(APIView):
             similarity_scores_map[job_id].append({
                 'cv_id': js.cv.id,
                 'type': js.cv.cv_type,
-                'score': js.similarity_score
+                'score': int(js.similarity_score)
             })
 
         applies_map = {js.job_id: js.is_applied for js in job_searches}
@@ -609,7 +609,7 @@ class CandidateAppliedJobsView(APIView):
             similarity_scores_map[job_id].append({
                 'cv_id': js.cv.id,
                 'type': js.cv.cv_type,
-                'score': js.similarity_score
+                'score': int(js.similarity_score)
             })
         applies_map = {js.job_id: js.is_applied for js in job_searches}
 
@@ -927,7 +927,7 @@ class PasswordResetRequestView(APIView):
         # Send password reset email
         send_mail(
             subject='Password Reset Request',
-            message=f'Click the link to reset your password: {reset_link}',
+            message=f'Click the link to reset your password: {verification_url}',
             from_email=settings.EMAIL_HOST_USER,
             recipient_list=[email],
         )
@@ -2889,7 +2889,7 @@ class CandidateCVsView(ListAPIView):
     def get_queryset(self):
         # Retrieve all CVs for the authenticated candidate
         candidate = self.request.user.candidate
-        return CV.objects.filter(candidate=candidate).select_related("cv_data", "job")
+        return CV.objects.filter(candidate=candidate).select_related("cv_data", "job").order_by('-created_at')
 
     @swagger_auto_schema(
         operation_description="Retrieve a list of CVs for the authenticated user, with the base CV always appearing first.",
@@ -2935,7 +2935,7 @@ class CandidateCVsView(ListAPIView):
             similarity_scores_map[job_id].append({
                 'cv_id': js.cv.id,
                 'type': js.cv.cv_type,
-                'score': js.similarity_score
+                'score': int(js.similarity_score)
             })
 
         # Combine base CV with the filtered queryset

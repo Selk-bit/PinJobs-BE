@@ -23,6 +23,7 @@ POPULAR_WEBSITES = [
     "https://www.bbc.com",
 ]
 BATCH_SIZE = 5
+
 DEFAULT_TEMPLATE_DATA = {
     'language': 'fr',
     'company_logo': {

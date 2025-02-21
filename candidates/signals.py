@@ -1,4 +1,4 @@
-from django.db.models.signals import post_save, pre_save
+from django.db.models.signals import post_save, pre_save, pre_delete
 from django.dispatch import receiver
 from .models import (Keyword, Location, KeywordLocationCombination, CV, Template, AbstractTemplate, CVData, UserProfile,
                      Candidate, JobSearch)
@@ -30,6 +30,12 @@ def enforce_single_base_cv(sender, instance, **kwargs):
         CV.objects.filter(candidate=instance.candidate, cv_type=CV.BASE).exclude(id=instance.id).delete()
 
 
+@receiver(pre_delete, sender=CV)
+def delete_template_with_cv(sender, instance, using, **kwargs):
+    if instance.template:
+        instance.template.delete()
+
+
 @receiver(post_save, sender=CV)
 def create_default_template(sender, instance, created, **kwargs):
     """
@@ -50,7 +56,7 @@ def create_default_template(sender, instance, created, **kwargs):
                     base_cv = CV.objects.filter(candidate=instance.candidate, cv_type=CV.BASE).first()
                     if base_cv:
                         base_cv_lang = detect_cv_language(base_cv.cv_data)
-                        career_translation = instance.career.translations.filter(language__code=base_cv_lang).first()
+                        career_translation = instance.career.translations.filter(language__code=base_cv_lang if base_cv_lang else "en").first()
                         instance.name = f"{career_translation.title} - Tailored CV" if career_translation else "Untitled"
                     else:
                         instance.name = "Untitled - Tailored CV"
@@ -100,39 +106,39 @@ def create_default_template(sender, instance, created, **kwargs):
 
 
 @receiver(post_save, sender=CVData)
-def update_cv_name_after_cvdata_save(sender, instance, created, **kwargs):
-    """
-    Update the CV name after the related CVData is created or updated.
-    """
-    try:
-        cv = instance.cv  # Access the related CV instance
-        if not cv.name or "Untitled" in cv.name:
-            if cv.cv_type == CV.BASE:
-                if not instance.title:
-                    instance.title = instance.headline if instance.headline else "Untitled"
-                cv.name = f"{instance.title} - Base CV"
-                cv.save(update_fields=["name"])
-                instance.save()
-    except Exception as e:
-        print(f"Error updating CV name after CVData save: {e}")
-
-
-@receiver(post_save, sender=CVData)
 def handle_cv_update(sender, instance, **kwargs):
     """
     Signal triggered when CVData or Template is created/updated.
     """
     # Determine the associated CV instance
     if sender == CVData:
-        cv = instance.cv  # Direct relation from CVData
+        cv = instance.cv
+        try:
+            if not cv.name or "Untitled" in cv.name:
+                if cv.cv_type == CV.BASE:
+                    title = instance.headline if instance.headline else "Untitled"
+                    if not instance.title:
+                        CVData.objects.filter(id=instance.id).update(title=title)
+                    cv.name = f"{title} - Base CV"
+                    cv.save(update_fields=["name"])
+
+        except Exception as e:
+            print(f"Error updating CV name after CVData save: {e}")
+
     elif sender == Template:
         try:
-            cv = CV.objects.get(template=instance)  # Find CV using the template
+            cv = CV.objects.get(template=instance)
         except CV.DoesNotExist:
             cv = None
 
-    # Generate PDF if both cv_data and template exist
     if cv and cv.cv_data and cv.cv_data.name and cv.template:
+        cv_lang = detect_cv_language(instance)
+        language_choices = Template._meta.get_field('language').choices
+        language_values = [choice[0] for choice in language_choices]
+        template_lang = cv_lang if cv_lang in language_values else None
+        Template.objects.filter(id=cv.template.id).update(language=template_lang)
+
+        # Generate PDF if both cv_data and template exist
         generate_cv_pdf(cv)
 
 
