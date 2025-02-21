@@ -133,7 +133,6 @@ def handle_cv_update(sender, instance, **kwargs):
 
     if cv and cv.cv_data and cv.cv_data.name and cv.template:
         cv_lang = detect_cv_language(instance)
-        print(cv_lang)
         language_choices = Template._meta.get_field('language').choices
         language_values = [choice[0] for choice in language_choices]
         template_lang = cv_lang if cv_lang in language_values else None
@@ -221,6 +220,10 @@ def generate_score_for_tailored_cv(sender, instance, created, **kwargs):
 
             score_data = json.loads(gemini_response)[0]
             score = score_data.get("score", 0)
+
+            job_search = JobSearch.objects.filter(cv=base_cv, job=job).first()
+            if job_search and job_search.similarity_score >= score:
+                score = job_search.similarity_score + 5
 
             # Create or update the JobSearch instance
             JobSearch.objects.update_or_create(
