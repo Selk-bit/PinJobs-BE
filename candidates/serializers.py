@@ -5,6 +5,10 @@ from .models import (Candidate, CV, CVData, Job, JobSearch, Payment, CreditPurch
 from django.contrib.auth.models import User
 from rest_framework.response import Response
 from langdetect import detect, LangDetectException
+import base64
+from django.core.files.storage import default_storage
+from mimetypes import guess_type
+from django.core.cache import cache
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -20,10 +24,14 @@ class CandidateSerializer(serializers.ModelSerializer):
         allow_null=True,
         use_url=True
     )
+    profile_picture_base64 = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Candidate
-        fields = ['id', 'first_name', 'last_name', 'phone', 'age', 'city', 'country', 'credits', 'profile_picture', 'user']
+        fields = [
+            'id', 'first_name', 'last_name', 'phone', 'age', 'city',
+            'country', 'credits', 'profile_picture', 'profile_picture_base64', 'user'
+        ]
 
     def validate_profile_picture(self, value):
         """
@@ -33,6 +41,44 @@ class CandidateSerializer(serializers.ModelSerializer):
             if not hasattr(value, 'name') or not value.name.lower().endswith(('.png', '.jpg', '.jpeg')):
                 raise serializers.ValidationError("Invalid file type. Only PNG, JPG, and JPEG are allowed.")
         return value
+
+    def get_profile_picture_base64(self, obj):
+        """Returns the image as a base64 string with the proper data URI prefix, cached."""
+        # 1. If candidate has no profile picture, just return None
+        if not obj.profile_picture or not obj.profile_picture.name:
+            return None
+
+        # 2. Generate a unique cache key for this candidate’s base64 image
+        cache_key = f"candidate_profile_base64_{obj.id}"
+
+        # 3. Try retrieving from cache
+        cached_data_uri = cache.get(cache_key)
+        if cached_data_uri:
+            return cached_data_uri  # Found in cache, return immediately
+
+        # 4. Not in cache – read from S3, encode, then cache
+        try:
+            with default_storage.open(obj.profile_picture.name, "rb") as f:
+                file_data = f.read()
+
+            encoded_image = base64.b64encode(file_data).decode('utf-8')
+
+            mime_type, _ = guess_type(obj.profile_picture.name)
+            if not mime_type:
+                mime_type = "application/octet-stream"
+
+            # Full data URI
+            data_uri = f"data:{mime_type};base64,{encoded_image}"
+
+            # 5. Store in cache for future calls
+            # Adjust the timeout (in seconds) as needed. Or remove it for "indefinite".
+            cache.set(cache_key, data_uri, timeout=60 * 60)  # 1 hour
+
+            return data_uri
+
+        except Exception as exc:
+            print(f"Error processing base64 image: {exc}")
+            return None
 
 
 class TemplateSerializer(serializers.ModelSerializer):

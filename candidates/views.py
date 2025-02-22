@@ -69,6 +69,7 @@ from django.utils.text import slugify
 import random
 import string
 import re
+from django.core.cache import cache
 
 
 class EmailVerificationTokenGenerator(PasswordResetTokenGenerator):
@@ -1027,6 +1028,9 @@ class UserProfileView(APIView):
         serializer = CandidateSerializer(candidate, data=request.data, partial=False)
         if serializer.is_valid():
             serializer.save()
+            # Cache invalidation after a successful update
+            cache_key = f"candidate_profile_base64_{candidate.id}"
+            cache.delete(cache_key)
             return Response(serializer.data, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1058,6 +1062,9 @@ class UserProfileView(APIView):
         serializer = CandidateSerializer(candidate, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
+            # Cache invalidation after a successful update
+            cache_key = f"candidate_profile_base64_{candidate.id}"
+            cache.delete(cache_key)
             return Response(serializer.data, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -2874,9 +2881,13 @@ class CVFilter(django_filters.FilterSet):
 
 
 class CandidateTailoredCVsPagination(PageNumberPagination):
-    page_size = 10
+    # page_size = 10
     page_size_query_param = "page_size"
-    max_page_size = 50
+    # max_page_size = 50
+
+    def paginate_queryset(self, queryset, request, view=None):
+        self.page_size = len(queryset)
+        return super().paginate_queryset(queryset, request, view)
 
 
 class CandidateCVsView(ListAPIView):
