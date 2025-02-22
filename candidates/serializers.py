@@ -19,18 +19,18 @@ class UserSerializer(serializers.ModelSerializer):
 
 class CandidateSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
-    profile_picture = serializers.ImageField(
-        required=False,
-        allow_null=True,
-        use_url=True
-    )
-    profile_picture_base64 = serializers.SerializerMethodField(read_only=True)
+    # profile_picture = serializers.ImageField(
+    #     required=False,
+    #     allow_null=True,
+    #     use_url=True
+    # )
+    profile_picture = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Candidate
         fields = [
             'id', 'first_name', 'last_name', 'phone', 'age', 'city',
-            'country', 'credits', 'profile_picture', 'profile_picture_base64', 'user'
+            'country', 'credits', 'profile_picture', 'user'
         ]
 
     def validate_profile_picture(self, value):
@@ -42,7 +42,7 @@ class CandidateSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError("Invalid file type. Only PNG, JPG, and JPEG are allowed.")
         return value
 
-    def get_profile_picture_base64(self, obj):
+    def get_profile_picture(self, obj):
         """Returns the image as a base64 string with the proper data URI prefix, cached."""
         # 1. If candidate has no profile picture, just return None
         if not obj.profile_picture or not obj.profile_picture.name:
